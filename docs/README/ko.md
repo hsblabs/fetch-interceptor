@@ -31,6 +31,8 @@ npm install @hsblabs/fetch-interceptor
 yarn add @hsblabs/fetch-interceptor
 # or
 pnpm add @hsblabs/fetch-interceptor
+# or
+bun add @hsblabs/fetch-interceptor
 ```
 
 ## 개발
