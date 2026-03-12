@@ -1,6 +1,6 @@
 {
 	"name": "@hsblabs/fetch-interceptor",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"description": "Lightweight TypeScript library for intercepting browser fetch and XMLHttpRequest traffic.",
 	"type": "module",
 	"types": "./dist/index.d.ts",
