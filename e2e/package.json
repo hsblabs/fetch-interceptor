@@ -1,0 +1,26 @@
+{
+	"name": "@hsblabs/fetch-interceptor-e2e",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build:lib": "pnpm --dir .. build",
+		"serve": "pnpm exec tsx ./scripts/start-fixture-server.ts",
+		"install:browsers": "pnpm exec playwright install chromium",
+		"test": "pnpm test:node && pnpm test:browser",
+		"pretest:node": "pnpm build:lib",
+		"test:node": "pnpm exec vitest run --config vitest.config.ts",
+		"pretest:browser": "pnpm build:lib",
+		"test:browser": "pnpm exec playwright test --config playwright.config.ts",
+		"test:browser:headed": "pnpm exec playwright test --config playwright.config.ts --headed"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.50.0",
+		"@types/node": "^25.4.0",
+		"tsx": "^4.19.2",
+		"typescript": "^5.9.3",
+		"vitest": "^4.0.18"
+	}
+}

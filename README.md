@@ -1,119 +1,114 @@
-# @your-scope/your-package
+# @hsblabs/fetch-interceptor
 
-`@your-scope/your-package` is a boilerplate repository for building and publishing TypeScript libraries to npm.
+Language:
+[English](https://github.com/hsblabs/fetch-interceptor/blob/main/README.md)
+| [日本語](https://github.com/hsblabs/fetch-interceptor/blob/main/docs/README/ja.md)
+| [简体中文](https://github.com/hsblabs/fetch-interceptor/blob/main/docs/README/zh-CN.md)
+| [한국어](https://github.com/hsblabs/fetch-interceptor/blob/main/docs/README/ko.md)
 
-It includes a strict TypeScript setup, `tsdown` for bundling, Vitest for unit tests, Biome for linting and formatting, and GitHub Actions workflows for CI and tagged publishes.
+`@hsblabs/fetch-interceptor` is a lightweight TypeScript library for transparently intercepting browser `fetch` and `XMLHttpRequest` traffic.
 
-The exported functions in `src/index.ts` are sample code. Replace them with your library API after you clone the template.
+Its key feature is that intercepted requests and responses are normalized to the standard Web API `Request` and `Response` objects. That lets you inspect and process XHR traffic without dealing with XHR-specific lifecycle complexity.
 
-The package name in this repository is intentionally a placeholder. This repository is the template, not the final library.
+## Features
 
-## Included Tooling
+- Unified around standard APIs
+  Both fetch and XHR traffic can be handled through `Request` and `Response`.
+- Fully type-safe
+  The API is predictable and comfortable to use in TypeScript.
+- Safe lifecycle control
+  A factory-based API lets you start interception when needed and restore native browser APIs cleanly.
+- Zero dependencies
+  The library stays small and easy to embed.
+- Built for browser environments
+  The API is intentionally simple for frontend integrations.
 
-- TypeScript with strict compiler settings
-- `tsdown` for ESM builds and `.d.ts` generation
-- Vitest for unit tests
-- Biome for linting and formatting
-- GitHub Actions for CI and npm publish
-- `prepublishOnly` checks to block broken releases
-
-## Quick Start
-
-```sh
-pnpm install
-pnpm test
-pnpm build
-```
-
-To turn this repository into a real package, update these fields first:
-
-- package name, description, keywords, repository URLs in `package.json`
-- README package name and usage examples
-- LICENSE copyright owner if needed
-- sample exports in `src/index.ts`
-- release details in `.changeset/config.json` if your repository conventions differ
-
-## Development Commands
+## Installation
 
 ```sh
-pnpm dev
-pnpm lint
-pnpm test
-pnpm build
-pnpm check
-pnpm changeset
-pnpm version-packages
-pnpm release
+npm install @hsblabs/fetch-interceptor
+# or
+yarn add @hsblabs/fetch-interceptor
+# or
+pnpm add @hsblabs/fetch-interceptor
 ```
 
-## Sample API
+## Development
 
-The current sample API demonstrates a few pure utilities that are easy to test and replace.
+```sh
+pnpm test
+pnpm test:e2e:node
+pnpm test:e2e:browser
+```
+
+Before running browser E2E tests for the first time, install Playwright Chromium with `pnpm test:e2e:install`.
+
+## Usage
+
+The library is designed to stay small at the call site. The example below intercepts only a specific API route and extracts JSON from the response.
 
 ```ts
-import { chunk, clamp, uniqueBy } from "@your-scope/your-package";
+import { createFetchInterceptor } from "@hsblabs/fetch-interceptor";
 
-const bounded = clamp(14, { min: 0, max: 10 });
-const groups = chunk([1, 2, 3, 4, 5], 2);
-const deduped = uniqueBy(
-  [
-    { id: "a", group: "x" },
-    { id: "b", group: "x" },
-    { id: "c", group: "y" },
-  ],
-  (item) => item.group,
-);
+const interceptor = createFetchInterceptor({
+	matcher: (req) => {
+		const url = new URL(req.url);
+		return url.pathname.includes("/api/target-data") && req.method === "GET";
+	},
+	onIntercept: async (req, res) => {
+		try {
+			const data = await res.json();
+			console.log("Intercepted data:", data);
 
-console.log({ bounded, groups, deduped });
+			// For example, forward data from a Chrome extension's main world
+			// to an isolated world:
+			// window.postMessage({ type: "INTERCEPTED_DATA", payload: data }, "*");
+		} catch (error) {
+			console.error("Failed to parse intercepted response:", error);
+		}
+	},
+});
+
+interceptor.start();
+
+// ...do work...
+
+// interceptor.stop();
 ```
 
-## Release Flow
+## API Reference
 
-This boilerplate uses Changesets for versioning and release PR management.
+### `createFetchInterceptor(options: FetchInterceptorOptions): FetchInterceptor`
 
-1. Add a release note with `pnpm changeset`.
-2. Merge the feature PR into `main`.
-3. The `publish.yml` workflow opens or updates a release PR.
-4. Review and merge the release PR.
-5. The same `publish.yml` workflow publishes the package from `main`.
+Creates an interceptor instance used to start and stop traffic interception.
 
-## Trusted Publishing Bootstrap
+### `FetchInterceptorOptions`
 
-Because npm lets you attach a Trusted Publisher only after a package exists, there is still a one-time bootstrap step.
+| Property | Type | Description |
+| --- | --- | --- |
+| `matcher` | `((req: Request) => boolean)?` | Predicate that decides whether a request should be intercepted. When omitted, all matching traffic is intercepted. |
+| `onIntercept` | `(req: Request, res: Response) => void` | Callback invoked when a matching request completes. `res` is a cloned response for fetch, or an equivalent standard `Response` for XHR. |
 
-Recommended operation:
+### `FetchInterceptor`
 
-1. Publish the package once from your local machine.
-2. Open the package settings on npmjs.com and add a Trusted Publisher.
-3. Set the GitHub repository and the workflow filename to `publish.yml`.
-4. Leave the environment name empty unless you intentionally protect the workflow with a GitHub Environment.
-5. Verify that the next publish works through GitHub Actions.
-6. After verification, disallow token-based publishing in npm package settings and revoke old publish tokens.
+| Method | Description |
+| --- | --- |
+| `start()` | Overrides `fetch` and `XMLHttpRequest` to begin interception. Calling it more than once is safe. |
+| `stop()` | Stops interception and restores the original browser APIs. |
 
-After bootstrap, later publishes should come from GitHub Actions with OIDC only.
+## Use Cases
 
-## Trusted Publisher Notes
+- Data extraction in browser extensions
+  Capture underlying REST or GraphQL responses directly from an SPA.
+- Debugging and logging
+  Observe requests and responses for a specific API surface.
+- Test instrumentation
+  Watch network activity and trigger test flow based on real responses.
 
-- Trusted publishing works only on GitHub-hosted runners.
-- The publish workflow must keep `id-token: write`.
-- For public packages from public repositories, npm generates provenance automatically when trusted publishing is used.
-- If CI needs private npm dependencies, use a read-only npm token only for install steps, not for `npm publish`.
+## Why This Library
 
-## Project Structure
+Cross-cutting browser traffic tooling gets messy when `fetch` and XHR need separate handling. `@hsblabs/fetch-interceptor` removes that split so you can focus on monitoring, extraction, debugging, and automation with a single `Request` / `Response` mental model.
 
-```text
-src/
-	index.ts
-	index.test.ts
-.github/workflows/
-	ci.yml
-	publish.yml
-.changeset/
-docs/plans/
-```
+## License
 
-## Notes
-
-- The package is ESM-first.
-- Build artifacts are emitted to `dist/`.
-- Only `dist/`, `README.md`, `CHANGELOG.md`, and `LICENSE` are published.
+MIT

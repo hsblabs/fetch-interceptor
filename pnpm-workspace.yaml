@@ -1,2 +1,5 @@
+packages:
+  - e2e
+
 ignoredBuiltDependencies:
   - esbuild

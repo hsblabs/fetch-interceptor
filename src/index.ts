@@ -1,47 +1,50 @@
-export interface ClampRange {
-	min: number;
-	max: number;
+import { interceptFetch } from "./fetch";
+import type { FetchInterceptor, FetchInterceptorOptions } from "./types";
+import { interceptXhr } from "./xhr";
+
+export * from "./types";
+
+const matchAllRequests = () => true;
+
+/**
+ * Creates a FetchInterceptor instance that intercepts network traffic.
+ * @param options Matcher and callback options for interception.
+ * @returns A control interface with start and stop methods.
+ */
+export function createFetchInterceptor(
+	options: FetchInterceptorOptions,
+): FetchInterceptor {
+	let isRunning = false;
+	const resolvedOptions = {
+		...options,
+		matcher: options.matcher ?? matchAllRequests,
+	};
+
+	// Hold the cleanup functions returned by each interception module.
+	let restoreFetch: (() => void) | null = null;
+	let restoreXhr: (() => void) | null = null;
+
+	const start = () => {
+		if (isRunning) return;
+		isRunning = true;
+
+		// Start fetch and xhr interception and keep their restore handlers.
+		restoreFetch = interceptFetch(resolvedOptions);
+		restoreXhr = interceptXhr(resolvedOptions);
+	};
+
+	const stop = () => {
+		if (!isRunning) return;
+		isRunning = false;
+
+		// Run the stored restore handlers to put globals back in place.
+		if (restoreFetch) restoreFetch();
+		if (restoreXhr) restoreXhr();
+
+		// Clear the stored references.
+		restoreFetch = null;
+		restoreXhr = null;
+	};
+
+	return { start, stop };
 }
-
-export const clamp = (value: number, range: ClampRange): number => {
-	if (range.min > range.max) {
-		throw new RangeError("range.min must be less than or equal to range.max");
-	}
-
-	return Math.min(Math.max(value, range.min), range.max);
-};
-
-export const chunk = <T>(items: readonly T[], size: number): T[][] => {
-	if (!Number.isInteger(size) || size < 1) {
-		throw new RangeError("size must be a positive integer");
-	}
-
-	const result: T[][] = [];
-
-	for (let index = 0; index < items.length; index += size) {
-		result.push(items.slice(index, index + size));
-	}
-
-	return result;
-};
-
-export const uniqueBy = <T, Key>(
-	items: readonly T[],
-	getKey: (item: T) => Key,
-): T[] => {
-	const seen = new Set<Key>();
-	const result: T[] = [];
-
-	for (const item of items) {
-		const key = getKey(item);
-
-		if (seen.has(key)) {
-			continue;
-		}
-
-		seen.add(key);
-		result.push(item);
-	}
-
-	return result;
-};
