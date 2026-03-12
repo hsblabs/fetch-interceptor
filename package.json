@@ -1,7 +1,7 @@
 {
 	"name": "@hsblabs/fetch-interceptor",
 	"version": "0.0.1",
-	"description": "A production-ready boilerplate for npm-publishable TypeScript libraries.",
+	"description": "Lightweight TypeScript library for intercepting browser fetch and XMLHttpRequest traffic.",
 	"type": "module",
 	"types": "./dist/index.d.ts",
 	"scripts": {
@@ -34,11 +34,14 @@
 		"registry": "https://registry.npmjs.org/"
 	},
 	"keywords": [
+		"fetch",
+		"interceptor",
+		"network",
+		"browser",
 		"typescript",
 		"library",
-		"npm",
-		"boilerplate",
-		"template",
+		"xhr",
+		"xmlhttprequest",
 		"esm"
 	],
 	"repository": {
