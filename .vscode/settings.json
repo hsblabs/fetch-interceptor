@@ -4,5 +4,9 @@
 	"editor.codeActionsOnSave": {
 		"source.fixAll.biome": "explicit"
 	},
+	"explorer.fileNesting.enabled": true,
+	"explorer.fileNesting.patterns": {
+		"package.json": "package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, pnpm-workspace.yaml, skills-lock.json"
+	},
 	"cSpell.words": []
 }
