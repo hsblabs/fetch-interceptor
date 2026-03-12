@@ -1,0 +1,65 @@
+{
+	"name": "@your-scope/your-package",
+	"version": "0.0.1",
+	"description": "A production-ready boilerplate for npm-publishable TypeScript libraries.",
+	"type": "module",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"dev": "tsdown --watch",
+		"build": "tsdown",
+		"check": "pnpm lint && pnpm test && pnpm build",
+		"changeset": "changeset",
+		"version-packages": "changeset version",
+		"release": "pnpm check && changeset publish",
+		"prepublishOnly": "pnpm check",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write ."
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"sideEffects": false,
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
+	"keywords": [
+		"typescript",
+		"library",
+		"npm",
+		"boilerplate",
+		"template",
+		"esm"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/hsblabs/typescript-library.git"
+	},
+	"homepage": "https://github.com/hsblabs/typescript-library#readme",
+	"bugs": {
+		"url": "https://github.com/hsblabs/typescript-library/issues"
+	},
+	"license": "MIT",
+	"engines": {
+		"node": ">=22"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.5",
+		"@changesets/cli": "^2.30.0",
+		"@types/node": "^25.4.0",
+		"tsdown": "^0.21.2",
+		"typescript": "^5.9.3",
+		"vitest": "^4.0.18"
+	},
+	"exports": {
+		".": "./dist/index.js",
+		"./package.json": "./package.json"
+	},
+	"packageManager": "pnpm@10.32.1"
+}

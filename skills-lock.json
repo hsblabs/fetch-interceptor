@@ -1,0 +1,35 @@
+{
+	"version": 1,
+	"skills": {
+		"architecture-decision-records": {
+			"source": "wshobson/agents",
+			"sourceType": "github",
+			"computedHash": "bffeafc71791924809ca9e24bfe3f18e87b2a060dbe5484468b4ff06c8e693b2"
+		},
+		"error-handling-patterns": {
+			"source": "wshobson/agents",
+			"sourceType": "github",
+			"computedHash": "824c53fa080765f05862d3ec0ef829aaff9f8d544f9de0039b8fcafa6bc1a899"
+		},
+		"pnpm": {
+			"source": "antfu/skills",
+			"sourceType": "github",
+			"computedHash": "318f9fca2441a3e06fedc336e195dd18be5dbe901064e4fa71b76b40b096ab3a"
+		},
+		"tsdown": {
+			"source": "antfu/skills",
+			"sourceType": "github",
+			"computedHash": "0230aa0d3df7c839d7cd3efa34cf18cf203da79a06c02fc8ebfdb6cd4142b593"
+		},
+		"typescript-advanced-types": {
+			"source": "wshobson/agents",
+			"sourceType": "github",
+			"computedHash": "3a3be8c925f96ac4e1280db28a01677e7ca5197f3792de2bbf35ab3bb324b6dd"
+		},
+		"vitest": {
+			"source": "antfu/skills",
+			"sourceType": "github",
+			"computedHash": "669c7275f7e1379b06b2bcfa593603aead4c983b951c7e8edbc09640aa38d0a1"
+		}
+	}
+}
