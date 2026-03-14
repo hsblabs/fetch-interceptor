@@ -1,10 +1,32 @@
-import { matchesRequestSafely, runOnInterceptSafely } from "./callbacks";
-import type { RuntimeInterceptorOptions } from "./types";
+import {
+	createInterceptionSnapshot,
+	matchesRequestSafely,
+	runInterceptionSnapshotOnError,
+	runInterceptionSnapshotOnSuccess,
+	runOnErrorSafely,
+	runOnInterceptSafely,
+} from "./callbacks";
+import type { FetchInterceptorError, RuntimeInterceptorOptions } from "./types";
 
-type FetchInterceptionSnapshot = Array<{
-	onIntercept: RuntimeInterceptorOptions["onIntercept"];
-	request: Request;
-}>;
+function isAbortError(error: unknown): boolean {
+	if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+		return error.name === "AbortError";
+	}
+
+	if (typeof error !== "object" || error === null) {
+		return false;
+	}
+
+	return "name" in error && error.name === "AbortError";
+}
+
+function createFetchInterceptorError(error: unknown): FetchInterceptorError {
+	return {
+		cause: error,
+		reason: isAbortError(error) ? "abort" : "error",
+		transport: "fetch",
+	};
+}
 
 export function createFetchRequest(
 	...args: Parameters<typeof globalThis.fetch>
@@ -26,34 +48,28 @@ export function createFetchInterceptorHandler(
 		...args: Parameters<typeof globalThis.fetch>
 	) {
 		const request = createFetchRequest(...args);
-		const response = await originalFetch(...args);
+		const shouldIntercept = matchesRequestSafely(request, options.matcher);
 
-		if (matchesRequestSafely(request, options.matcher)) {
-			runOnInterceptSafely(request, response.clone(), options.onIntercept);
+		try {
+			const response = await originalFetch(...args);
+
+			if (shouldIntercept) {
+				runOnInterceptSafely(request, response.clone(), options.onIntercept);
+			}
+
+			return response;
+		} catch (error) {
+			if (shouldIntercept) {
+				runOnErrorSafely(
+					request,
+					createFetchInterceptorError(error),
+					options.onError,
+				);
+			}
+
+			throw error;
 		}
-
-		return response;
 	};
-}
-
-function createFetchInterceptionSnapshot(
-	request: Request,
-	interceptors: RuntimeInterceptorOptions[],
-): FetchInterceptionSnapshot {
-	const snapshot: FetchInterceptionSnapshot = [];
-
-	for (const interceptor of interceptors) {
-		const interceptedRequest = request.clone();
-
-		if (matchesRequestSafely(interceptedRequest, interceptor.matcher)) {
-			snapshot.push({
-				request: interceptedRequest,
-				onIntercept: interceptor.onIntercept,
-			});
-		}
-	}
-
-	return snapshot;
 }
 
 function createSharedFetchInterceptorHandler(
@@ -67,21 +83,24 @@ function createSharedFetchInterceptorHandler(
 		const interceptionSnapshot =
 			activeInterceptors.length === 0
 				? []
-				: createFetchInterceptionSnapshot(
+				: createInterceptionSnapshot(
 						createFetchRequest(...args),
 						activeInterceptors,
 					);
-		const response = await originalFetch(...args);
 
-		for (const interceptor of interceptionSnapshot) {
-			runOnInterceptSafely(
-				interceptor.request,
+		try {
+			const response = await originalFetch(...args);
+			runInterceptionSnapshotOnSuccess(interceptionSnapshot, () =>
 				response.clone(),
-				interceptor.onIntercept,
 			);
+			return response;
+		} catch (error) {
+			runInterceptionSnapshotOnError(
+				interceptionSnapshot,
+				createFetchInterceptorError(error),
+			);
+			throw error;
 		}
-
-		return response;
 	};
 }
 
@@ -98,7 +117,6 @@ export function interceptFetch(
 		getActiveInterceptors,
 	);
 
-	// Return a cleanup function.
 	return function restoreFetch() {
 		globalThis.fetch = originalFetch;
 	};

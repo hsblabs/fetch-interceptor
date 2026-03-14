@@ -7,6 +7,7 @@
 		"serve": "pnpm exec tsx ./scripts/start-fixture-server.ts",
 		"install:browsers": "pnpm exec playwright install chromium",
 		"test": "pnpm test:node && pnpm test:browser",
+		"test:types": "pnpm exec tsc --noEmit",
 		"pretest:node": "pnpm build:lib",
 		"test:node": "pnpm exec vitest run --config vitest.config.ts",
 		"pretest:browser": "pnpm build:lib",

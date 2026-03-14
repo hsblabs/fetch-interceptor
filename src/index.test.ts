@@ -17,6 +17,7 @@ type Deferred<T> = {
 
 type MockXhrResponse = {
 	body?: BodyInit | null;
+	eventType?: "abort" | "error" | "load" | "timeout";
 	headers?: Record<string, string>;
 	response?: XMLHttpRequest["response"];
 	responseText?: string;
@@ -45,7 +46,10 @@ class MockXMLHttpRequest {
 		MockXMLHttpRequest.responses.push(response);
 	}
 
-	private listeners = new Map<string, Array<() => void>>();
+	private listeners = new Map<
+		string,
+		Array<(event: ProgressEvent<XMLHttpRequestEventTarget>) => void>
+	>();
 	private rawResponseHeaders = "";
 
 	status = 0;
@@ -58,10 +62,24 @@ class MockXMLHttpRequest {
 
 	setRequestHeader(_name: string, _value: string) {}
 
-	addEventListener(type: string, listener: () => void) {
+	addEventListener(
+		type: string,
+		listener: (event: ProgressEvent<XMLHttpRequestEventTarget>) => void,
+	) {
 		const callbacks = this.listeners.get(type) ?? [];
 		callbacks.push(listener);
 		this.listeners.set(type, callbacks);
+	}
+
+	removeEventListener(
+		type: string,
+		listener: (event: ProgressEvent<XMLHttpRequestEventTarget>) => void,
+	) {
+		const callbacks = this.listeners.get(type) ?? [];
+		this.listeners.set(
+			type,
+			callbacks.filter((callback) => callback !== listener),
+		);
 	}
 
 	getAllResponseHeaders() {
@@ -70,6 +88,7 @@ class MockXMLHttpRequest {
 
 	send(_body?: Document | XMLHttpRequestBodyInit | null) {
 		const nextResponse = MockXMLHttpRequest.responses.shift() ?? {};
+		const eventType = nextResponse.eventType ?? "load";
 
 		this.status = nextResponse.status ?? 200;
 		this.statusText = nextResponse.statusText ?? "OK";
@@ -82,8 +101,14 @@ class MockXMLHttpRequest {
 			.map(([name, value]) => `${name}: ${value}`)
 			.join("\r\n");
 
-		for (const listener of this.listeners.get("load") ?? []) {
-			listener();
+		const event = {
+			currentTarget: this,
+			target: this,
+			type: eventType,
+		} as ProgressEvent<XMLHttpRequestEventTarget>;
+
+		for (const listener of this.listeners.get(eventType) ?? []) {
+			listener(event);
 		}
 	}
 }
@@ -219,6 +244,111 @@ describe("createFetchInterceptor", () => {
 		expect(response.statusText).toBe("Accepted");
 		expect(response.headers.get("x-request-id")).toBe("req-1");
 		expect(await response.json()).toEqual({ ok: true });
+
+		interceptor.stop();
+	});
+
+	it("reports rejected fetch requests through onError and preserves the original rejection", async () => {
+		const networkError = new TypeError("network failed");
+		const onIntercept = vi.fn();
+		const onError = vi.fn();
+		const originalFetch = vi.fn(async () => {
+			throw networkError;
+		});
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({
+			matcher: () => true,
+			onIntercept,
+			onError,
+		});
+
+		interceptor.start();
+
+		await expect(fetch("https://example.com/fetch-failure")).rejects.toBe(
+			networkError,
+		);
+
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(onError).toHaveBeenCalledOnce();
+
+		const [request, error] = onError.mock.calls[0];
+
+		expect(request.url).toBe("https://example.com/fetch-failure");
+		expect(error).toMatchObject({
+			cause: networkError,
+			reason: "error",
+			transport: "fetch",
+		});
+
+		interceptor.stop();
+	});
+
+	it.each([
+		["error"],
+		["abort"],
+		["timeout"],
+	] as const)("reports XMLHttpRequest %s events through onError", (eventType) => {
+		const onIntercept = vi.fn();
+		const onError = vi.fn();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({ eventType });
+
+		const interceptor = createFetchInterceptor({
+			onIntercept,
+			onError,
+		});
+
+		interceptor.start();
+
+		const xhr = new XMLHttpRequest();
+		xhr.open("POST", "https://example.com/xhr-failure");
+		xhr.send(JSON.stringify({ hello: "world" }));
+
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(onError).toHaveBeenCalledOnce();
+
+		const [request, error] = onError.mock.calls[0];
+
+		expect(request.method).toBe("POST");
+		expect(request.url).toBe("https://example.com/xhr-failure");
+		expect(error).toMatchObject({
+			reason: eventType,
+			transport: "xhr",
+		});
+		expect(error.cause).toMatchObject({
+			type: eventType,
+		});
+
+		interceptor.stop();
+	});
+
+	it("does not leak XMLHttpRequest terminal handlers across repeated sends", () => {
+		const seenUrls: string[] = [];
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({ body: "first" });
+		MockXMLHttpRequest.enqueueResponse({ body: "second" });
+
+		const interceptor = createFetchInterceptor({
+			onIntercept: (request) => seenUrls.push(request.url),
+		});
+
+		interceptor.start();
+
+		const xhr = new XMLHttpRequest();
+		xhr.open("GET", "https://example.com/first");
+		xhr.send();
+		xhr.open("GET", "https://example.com/second");
+		xhr.send();
+
+		expect(seenUrls).toEqual([
+			"https://example.com/first",
+			"https://example.com/second",
+		]);
 
 		interceptor.stop();
 	});
