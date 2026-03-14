@@ -111,6 +111,12 @@ Creates an interceptor instance used to start and stop traffic interception.
 
 Cross-cutting browser traffic tooling gets messy when `fetch` and XHR need separate handling. `@hsblabs/fetch-interceptor` removes that split so you can focus on monitoring, extraction, debugging, and automation with a single `Request` / `Response` mental model.
 
+## Contributing
+
+Contributions are welcome.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution workflow and [docs/label-policy.md](./docs/label-policy.md) for the issue label policy.
+
 ## License
 
 MIT
