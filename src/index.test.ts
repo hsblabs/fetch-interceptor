@@ -20,6 +20,7 @@ type MockXhrResponse = {
 	headers?: Record<string, string>;
 	response?: XMLHttpRequest["response"];
 	responseText?: string;
+	responseType?: XMLHttpRequestResponseType;
 	status?: number;
 	statusText?: string;
 };
@@ -50,6 +51,7 @@ class MockXMLHttpRequest {
 	status = 0;
 	statusText = "";
 	response: XMLHttpRequest["response"] = null;
+	responseType: XMLHttpRequestResponseType = "";
 	responseText = "";
 
 	open(_method: string, _url: string | URL, ..._args: unknown[]) {}
@@ -72,6 +74,7 @@ class MockXMLHttpRequest {
 		this.status = nextResponse.status ?? 200;
 		this.statusText = nextResponse.statusText ?? "OK";
 		this.response = nextResponse.response ?? nextResponse.body ?? null;
+		this.responseType = nextResponse.responseType ?? this.responseType;
 		this.responseText =
 			nextResponse.responseText ??
 			(typeof nextResponse.body === "string" ? nextResponse.body : "");
@@ -216,6 +219,40 @@ describe("createFetchInterceptor", () => {
 		expect(response.statusText).toBe("Accepted");
 		expect(response.headers.get("x-request-id")).toBe("req-1");
 		expect(await response.json()).toEqual({ ok: true });
+
+		interceptor.stop();
+	});
+
+	it("normalizes JSON XMLHttpRequest responses into a readable Response body", async () => {
+		const intercepted = createDeferred<{
+			request: Request;
+			response: Response;
+		}>();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({
+			headers: {
+				"content-type": "application/json",
+			},
+			response: { ok: true, version: 1 },
+		});
+
+		const interceptor = createFetchInterceptor({
+			onIntercept: (request, response) =>
+				intercepted.resolve({ request, response }),
+		});
+
+		interceptor.start();
+
+		const xhr = new XMLHttpRequest();
+		xhr.open("GET", "https://example.com/xhr-json");
+		xhr.responseType = "json";
+		xhr.send();
+
+		const { request, response } = await intercepted.promise;
+
+		expect(request.url).toBe("https://example.com/xhr-json");
+		expect(await response.json()).toEqual({ ok: true, version: 1 });
 
 		interceptor.stop();
 	});

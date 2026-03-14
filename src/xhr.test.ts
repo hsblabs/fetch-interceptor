@@ -65,6 +65,7 @@ describe("createXhrResponse", () => {
 			getAllResponseHeaders: () =>
 				"content-type: application/json\r\nx-request-id: req-1",
 			response: JSON.stringify({ ok: true }),
+			responseType: "",
 			responseText: "fallback",
 			status: 202,
 			statusText: "Accepted",
@@ -74,6 +75,34 @@ describe("createXhrResponse", () => {
 		expect(response.statusText).toBe("Accepted");
 		expect(response.headers.get("x-request-id")).toBe("req-1");
 		expect(await response.json()).toEqual({ ok: true });
+	});
+
+	it("serializes JSON response objects before constructing the Response", async () => {
+		const response = createXhrResponse({
+			getAllResponseHeaders: () => "content-type: application/json",
+			response: { nested: { ok: true } },
+			responseType: "json",
+			responseText: "",
+			status: 200,
+			statusText: "OK",
+		});
+
+		expect(await response.json()).toEqual({ nested: { ok: true } });
+	});
+
+	it("treats unreadable responseText as an empty body", async () => {
+		const response = createXhrResponse({
+			getAllResponseHeaders: () => "",
+			response: null,
+			responseType: "json",
+			get responseText() {
+				throw new Error("InvalidStateError");
+			},
+			status: 200,
+			statusText: "OK",
+		});
+
+		expect(await response.text()).toBe("");
 	});
 });
 
@@ -87,6 +116,7 @@ describe("createXhrLoadHandler", () => {
 			{
 				getAllResponseHeaders: () => "content-type: text/plain",
 				response: "ok",
+				responseType: "",
 				responseText: "fallback",
 				status: 200,
 				statusText: "OK",
@@ -114,6 +144,7 @@ describe("createXhrLoadHandler", () => {
 			{
 				getAllResponseHeaders: () => "",
 				response: null,
+				responseType: "",
 				responseText: "",
 				status: 204,
 				statusText: "No Content",
@@ -139,6 +170,7 @@ describe("createXhrLoadHandler", () => {
 			{
 				getAllResponseHeaders: () => "",
 				response: "ok",
+				responseType: "",
 				responseText: "ok",
 				status: 200,
 				statusText: "OK",
@@ -165,6 +197,7 @@ describe("createXhrLoadHandler", () => {
 			{
 				getAllResponseHeaders: () => "",
 				response: "ok",
+				responseType: "",
 				responseText: "ok",
 				status: 200,
 				statusText: "OK",
