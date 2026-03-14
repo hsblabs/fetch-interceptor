@@ -21,6 +21,31 @@ describe("createFetchRequest", () => {
 		expect(await clonedRequest.text()).toBe("hello");
 	});
 
+	it("applies init overrides to Request inputs without consuming the original body", async () => {
+		const originalRequest = new Request("https://example.com/base", {
+			body: "original-body",
+			headers: {
+				"x-original": "1",
+			},
+			method: "POST",
+		});
+
+		const request = createFetchRequest(originalRequest, {
+			body: "override-body",
+			headers: {
+				"x-override": "1",
+			},
+			method: "PUT",
+		});
+
+		expect(request.method).toBe("PUT");
+		expect(request.headers.get("x-original")).toBeNull();
+		expect(request.headers.get("x-override")).toBe("1");
+		expect(await request.text()).toBe("override-body");
+		expect(originalRequest.bodyUsed).toBe(false);
+		expect(await originalRequest.text()).toBe("original-body");
+	});
+
 	it("creates a Request from fetch arguments", async () => {
 		const request = createFetchRequest("https://example.com/from-args", {
 			body: JSON.stringify({ hello: "world" }),
@@ -35,6 +60,40 @@ describe("createFetchRequest", () => {
 });
 
 describe("createFetchInterceptorHandler", () => {
+	it("matches against the effective Request when fetch receives Request and init", async () => {
+		const onIntercept = vi.fn();
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
+			matcher: (request) => request.method === "POST",
+			onIntercept,
+		});
+		const baseRequest = new Request("https://example.com/base", {
+			headers: {
+				"x-original": "1",
+			},
+			method: "PUT",
+		});
+
+		await interceptedFetch(baseRequest, {
+			body: "override-body",
+			headers: {
+				"x-override": "1",
+			},
+			method: "POST",
+		});
+
+		expect(originalFetch).toHaveBeenCalledOnce();
+		expect(onIntercept).toHaveBeenCalledOnce();
+
+		const [request] = onIntercept.mock.calls[0];
+
+		expect(request.method).toBe("POST");
+		expect(request.headers.get("x-original")).toBeNull();
+		expect(request.headers.get("x-override")).toBe("1");
+		expect(await request.text()).toBe("override-body");
+		expect(baseRequest.bodyUsed).toBe(false);
+	});
+
 	it("intercepts matching requests with a cloned response", async () => {
 		const onIntercept = vi.fn();
 		const originalFetch = vi.fn(async () => {
