@@ -14,7 +14,7 @@ export interface FetchInterceptorOptions {
 	 * @param req A standard Request object.
 	 * @param res A standard Response object, or a cloned equivalent.
 	 */
-	onIntercept: (req: Request, res: Response) => void;
+	onIntercept: (req: Request, res: Response) => void | Promise<void>;
 }
 
 /**

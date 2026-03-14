@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
 	createXhrLoadHandler,
@@ -6,6 +6,10 @@ import {
 	createXhrResponse,
 	parseXhrResponseHeaders,
 } from "./xhr";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe("createXhrRequest", () => {
 	it("keeps request bodies for non-GET methods, including empty strings", async () => {
@@ -124,5 +128,60 @@ describe("createXhrLoadHandler", () => {
 		handleLoad();
 
 		expect(onIntercept).not.toHaveBeenCalled();
+	});
+
+	it("reports matcher errors without throwing", () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+		const handleLoad = createXhrLoadHandler(
+			{
+				getAllResponseHeaders: () => "",
+				response: "ok",
+				responseText: "ok",
+				status: 200,
+				statusText: "OK",
+			},
+			new Request("https://example.com/xhr"),
+			{
+				matcher: () => {
+					throw new Error("matcher failed");
+				},
+				onIntercept,
+			},
+		);
+
+		expect(() => handleLoad()).not.toThrow();
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(consoleError).toHaveBeenCalledOnce();
+	});
+
+	it("reports rejected async onIntercept callbacks without throwing", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const handleLoad = createXhrLoadHandler(
+			{
+				getAllResponseHeaders: () => "",
+				response: "ok",
+				responseText: "ok",
+				status: 200,
+				statusText: "OK",
+			},
+			new Request("https://example.com/xhr"),
+			{
+				matcher: () => true,
+				onIntercept: async () => {
+					throw new Error("async onIntercept failed");
+				},
+			},
+		);
+
+		expect(() => handleLoad()).not.toThrow();
+
+		await Promise.resolve();
+
+		expect(consoleError).toHaveBeenCalledOnce();
 	});
 });

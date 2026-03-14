@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFetchInterceptorHandler, createFetchRequest } from "./fetch";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe("createFetchRequest", () => {
 	it("clones Request inputs", async () => {
@@ -68,5 +72,63 @@ describe("createFetchInterceptorHandler", () => {
 
 		expect(originalFetch).toHaveBeenCalledOnce();
 		expect(onIntercept).not.toHaveBeenCalled();
+	});
+
+	it("preserves successful fetch responses when matcher throws", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		const onIntercept = vi.fn();
+		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
+			matcher: () => {
+				throw new Error("matcher failed");
+			},
+			onIntercept,
+		});
+
+		const response = await interceptedFetch("https://example.com/target");
+
+		expect(await response.text()).toBe("ok");
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(consoleError).toHaveBeenCalledOnce();
+	});
+
+	it("preserves successful fetch responses when onIntercept throws", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
+			matcher: () => true,
+			onIntercept: () => {
+				throw new Error("onIntercept failed");
+			},
+		});
+
+		const response = await interceptedFetch("https://example.com/target");
+
+		expect(await response.text()).toBe("ok");
+		expect(consoleError).toHaveBeenCalledOnce();
+	});
+
+	it("reports rejected async onIntercept callbacks without rejecting fetch", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
+			matcher: () => true,
+			onIntercept: async () => {
+				throw new Error("async onIntercept failed");
+			},
+		});
+
+		const response = await interceptedFetch("https://example.com/target");
+
+		await Promise.resolve();
+
+		expect(await response.text()).toBe("ok");
+		expect(consoleError).toHaveBeenCalledOnce();
 	});
 });

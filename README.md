@@ -78,6 +78,8 @@ interceptor.start();
 // interceptor.stop();
 ```
 
+If `matcher` throws, or if `onIntercept` throws or returns a rejected promise, the library reports the failure with `console.error` and preserves the original network result.
+
 ## API Reference
 
 ### `createFetchInterceptor(options: FetchInterceptorOptions): FetchInterceptor`
@@ -88,8 +90,8 @@ Creates an interceptor instance used to start and stop traffic interception.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `matcher` | `((req: Request) => boolean)?` | Predicate that decides whether a request should be intercepted. When omitted, all matching traffic is intercepted. |
-| `onIntercept` | `(req: Request, res: Response) => void` | Callback invoked when a matching request completes. `res` is a cloned response for fetch, or an equivalent standard `Response` for XHR. |
+| `matcher` | `((req: Request) => boolean)?` | Predicate that decides whether a request should be intercepted. When omitted, all matching traffic is intercepted. Exceptions are reported and treated as a non-match. |
+| `onIntercept` | `(req: Request, res: Response) => void \| Promise<void>` | Callback invoked when a matching request completes. `res` is a cloned response for fetch, or an equivalent standard `Response` for XHR. Exceptions and rejected promises are reported without changing the original request outcome. |
 
 ### `FetchInterceptor`
 

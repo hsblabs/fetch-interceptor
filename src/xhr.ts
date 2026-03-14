@@ -1,3 +1,4 @@
+import { matchesRequestSafely, runOnInterceptSafely } from "./callbacks";
 import type { FetchInterceptorOptions } from "./types";
 
 // Tracks request metadata associated with each XHR instance.
@@ -95,11 +96,11 @@ export function createXhrLoadHandler(
 	options: RuntimeInterceptorOptions,
 ): () => void {
 	return () => {
-		if (!options.matcher(request)) {
+		if (!matchesRequestSafely(request, options.matcher)) {
 			return;
 		}
 
-		options.onIntercept(request, createXhrResponse(xhr));
+		runOnInterceptSafely(request, createXhrResponse(xhr), options.onIntercept);
 	};
 }
 
