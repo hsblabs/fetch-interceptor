@@ -18,6 +18,16 @@ export interface FetchInterceptorOptions {
 }
 
 /**
+ * Runtime options after default values have been resolved.
+ */
+export type RuntimeInterceptorOptions = Omit<
+	FetchInterceptorOptions,
+	"matcher"
+> & {
+	matcher: NonNullable<FetchInterceptorOptions["matcher"]>;
+};
+
+/**
  * FetchInterceptor instance exposed to consumers.
  */
 export interface FetchInterceptor {

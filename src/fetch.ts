@@ -1,9 +1,10 @@
 import { matchesRequestSafely, runOnInterceptSafely } from "./callbacks";
-import type { FetchInterceptorOptions } from "./types";
+import type { RuntimeInterceptorOptions } from "./types";
 
-type RuntimeInterceptorOptions = Omit<FetchInterceptorOptions, "matcher"> & {
-	matcher: NonNullable<FetchInterceptorOptions["matcher"]>;
-};
+type FetchInterceptionSnapshot = Array<{
+	onIntercept: RuntimeInterceptorOptions["onIntercept"];
+	request: Request;
+}>;
 
 export function createFetchRequest(
 	...args: Parameters<typeof globalThis.fetch>
@@ -35,13 +36,67 @@ export function createFetchInterceptorHandler(
 	};
 }
 
+function createFetchInterceptionSnapshot(
+	request: Request,
+	interceptors: RuntimeInterceptorOptions[],
+): FetchInterceptionSnapshot {
+	const snapshot: FetchInterceptionSnapshot = [];
+
+	for (const interceptor of interceptors) {
+		const interceptedRequest = request.clone();
+
+		if (matchesRequestSafely(interceptedRequest, interceptor.matcher)) {
+			snapshot.push({
+				request: interceptedRequest,
+				onIntercept: interceptor.onIntercept,
+			});
+		}
+	}
+
+	return snapshot;
+}
+
+function createSharedFetchInterceptorHandler(
+	originalFetch: typeof globalThis.fetch,
+	getActiveInterceptors: () => RuntimeInterceptorOptions[],
+): typeof globalThis.fetch {
+	return async function interceptedFetch(
+		...args: Parameters<typeof globalThis.fetch>
+	) {
+		const activeInterceptors = getActiveInterceptors();
+		const interceptionSnapshot =
+			activeInterceptors.length === 0
+				? []
+				: createFetchInterceptionSnapshot(
+						createFetchRequest(...args),
+						activeInterceptors,
+					);
+		const response = await originalFetch(...args);
+
+		for (const interceptor of interceptionSnapshot) {
+			runOnInterceptSafely(
+				interceptor.request,
+				response.clone(),
+				interceptor.onIntercept,
+			);
+		}
+
+		return response;
+	};
+}
+
 /**
  * Intercepts globalThis.fetch and returns a restore function.
  */
-export function interceptFetch(options: RuntimeInterceptorOptions): () => void {
+export function interceptFetch(
+	getActiveInterceptors: () => RuntimeInterceptorOptions[],
+): () => void {
 	const originalFetch = globalThis.fetch;
 
-	globalThis.fetch = createFetchInterceptorHandler(originalFetch, options);
+	globalThis.fetch = createSharedFetchInterceptorHandler(
+		originalFetch,
+		getActiveInterceptors,
+	);
 
 	// Return a cleanup function.
 	return function restoreFetch() {
