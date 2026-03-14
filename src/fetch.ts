@@ -1,3 +1,4 @@
+import { matchesRequestSafely, runOnInterceptSafely } from "./callbacks";
 import type { FetchInterceptorOptions } from "./types";
 
 type RuntimeInterceptorOptions = Omit<FetchInterceptorOptions, "matcher"> & {
@@ -26,8 +27,8 @@ export function createFetchInterceptorHandler(
 		const request = createFetchRequest(...args);
 		const response = await originalFetch(...args);
 
-		if (options.matcher(request)) {
-			options.onIntercept(request, response.clone());
+		if (matchesRequestSafely(request, options.matcher)) {
+			runOnInterceptSafely(request, response.clone(), options.onIntercept);
 		}
 
 		return response;
