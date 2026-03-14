@@ -39,7 +39,8 @@ type XhrResponseSource = Pick<
 
 type XhrFailureReason = FetchInterceptorErrorReason;
 type XhrTerminalEventType = XhrFailureReason | "load";
-type XhrTerminalHandler = (event: ProgressEvent<XMLHttpRequest>) => void;
+type XhrTerminalEvent = ProgressEvent<XMLHttpRequestEventTarget>;
+type XhrTerminalHandler = (event: XhrTerminalEvent) => void;
 type XhrTerminalHandlers = Record<XhrTerminalEventType, XhrTerminalHandler>;
 
 function toRequestBody(body: Document | XMLHttpRequestBodyInit): BodyInit {
@@ -48,6 +49,20 @@ function toRequestBody(body: Document | XMLHttpRequestBodyInit): BodyInit {
 	}
 
 	return body as BodyInit;
+}
+
+function cloneArrayBufferView(
+	bufferView: ArrayBufferView<ArrayBufferLike>,
+): Uint8Array<ArrayBuffer> {
+	const copy = new Uint8Array(new ArrayBuffer(bufferView.byteLength));
+	copy.set(
+		new Uint8Array(
+			bufferView.buffer,
+			bufferView.byteOffset,
+			bufferView.byteLength,
+		),
+	);
+	return copy;
 }
 
 export function createXhrRequest(
@@ -116,7 +131,9 @@ function toResponseBody(xhr: XhrResponseSource): BodyInit | null {
 	}
 
 	if (response instanceof ArrayBuffer || ArrayBuffer.isView(response)) {
-		return response;
+		return response instanceof ArrayBuffer
+			? response
+			: cloneArrayBufferView(response);
 	}
 
 	if (typeof Document !== "undefined" && response instanceof Document) {
@@ -155,7 +172,7 @@ export function createXhrLoadHandler(
 }
 
 function createXhrInterceptorError(
-	cause: ProgressEvent<XMLHttpRequest>,
+	cause: XhrTerminalEvent,
 	reason: XhrFailureReason,
 ): FetchInterceptorError {
 	return {

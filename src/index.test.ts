@@ -48,7 +48,7 @@ class MockXMLHttpRequest {
 
 	private listeners = new Map<
 		string,
-		Array<(event: ProgressEvent<XMLHttpRequest>) => void>
+		Array<(event: ProgressEvent<XMLHttpRequestEventTarget>) => void>
 	>();
 	private rawResponseHeaders = "";
 
@@ -64,7 +64,7 @@ class MockXMLHttpRequest {
 
 	addEventListener(
 		type: string,
-		listener: (event: ProgressEvent<XMLHttpRequest>) => void,
+		listener: (event: ProgressEvent<XMLHttpRequestEventTarget>) => void,
 	) {
 		const callbacks = this.listeners.get(type) ?? [];
 		callbacks.push(listener);
@@ -73,7 +73,7 @@ class MockXMLHttpRequest {
 
 	removeEventListener(
 		type: string,
-		listener: (event: ProgressEvent<XMLHttpRequest>) => void,
+		listener: (event: ProgressEvent<XMLHttpRequestEventTarget>) => void,
 	) {
 		const callbacks = this.listeners.get(type) ?? [];
 		this.listeners.set(
@@ -105,7 +105,7 @@ class MockXMLHttpRequest {
 			currentTarget: this,
 			target: this,
 			type: eventType,
-		} as ProgressEvent<XMLHttpRequest>;
+		} as ProgressEvent<XMLHttpRequestEventTarget>;
 
 		for (const listener of this.listeners.get(eventType) ?? []) {
 			listener(event);

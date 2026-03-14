@@ -1,4 +1,5 @@
 import type {
+	FetchInterceptorError,
 	FetchInterceptorOptions,
 	RuntimeInterceptorOptions,
 } from "./types";
@@ -53,7 +54,7 @@ export function runOnInterceptSafely(
 
 export function runOnErrorSafely(
 	request: Request,
-	error: unknown,
+	error: FetchInterceptorError,
 	onError: FetchInterceptorOptions["onError"],
 ): void {
 	if (!onError) {
@@ -110,7 +111,7 @@ export function runInterceptionSnapshotOnSuccess(
 
 export function runInterceptionSnapshotOnError(
 	snapshot: InterceptionSnapshot,
-	error: unknown,
+	error: FetchInterceptorError,
 ): void {
 	for (const interceptor of snapshot) {
 		runOnErrorSafely(interceptor.request, error, interceptor.onError);
