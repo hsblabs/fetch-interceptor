@@ -21,6 +21,7 @@ type XhrResponseSource = Pick<
 	XMLHttpRequest,
 	| "getAllResponseHeaders"
 	| "response"
+	| "responseType"
 	| "responseText"
 	| "status"
 	| "statusText"
@@ -81,8 +82,46 @@ export function parseXhrResponseHeaders(rawHeaders: string): Headers {
 	return headers;
 }
 
+function readXhrResponseText(xhr: XhrResponseSource): string | null {
+	try {
+		return xhr.responseText;
+	} catch {
+		return null;
+	}
+}
+
+function toResponseBody(xhr: XhrResponseSource): BodyInit | null {
+	const { response, responseType } = xhr;
+
+	if (response == null) {
+		return readXhrResponseText(xhr);
+	}
+
+	if (typeof response === "string") {
+		return response;
+	}
+
+	if (typeof Blob !== "undefined" && response instanceof Blob) {
+		return response;
+	}
+
+	if (response instanceof ArrayBuffer || ArrayBuffer.isView(response)) {
+		return response;
+	}
+
+	if (typeof Document !== "undefined" && response instanceof Document) {
+		return new XMLSerializer().serializeToString(response);
+	}
+
+	if (responseType === "json") {
+		return JSON.stringify(response);
+	}
+
+	return readXhrResponseText(xhr);
+}
+
 export function createXhrResponse(xhr: XhrResponseSource): Response {
-	const responseBody = xhr.response ?? xhr.responseText;
+	const responseBody = toResponseBody(xhr);
 
 	return new Response(responseBody, {
 		status: xhr.status,
