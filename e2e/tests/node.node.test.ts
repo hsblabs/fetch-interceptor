@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { FetchInterceptorError } from "../../src";
 import { type FixtureServer, startFixtureServer } from "../src/fixture-server";
 
 type InterceptSnapshot = {
@@ -14,6 +15,14 @@ type InterceptSnapshot = {
 		headers: Record<string, string>;
 		status: number;
 		statusText: string;
+	};
+};
+
+type ErrorSnapshot = {
+	error: FetchInterceptorError;
+	request: {
+		method: string;
+		url: string;
 	};
 };
 
@@ -240,5 +249,52 @@ describe("real network behavior in Node", () => {
 		expect(interceptedByB[2]?.response.body).toMatchObject({
 			query: { client: "node-in-flight", delayMs: "50" },
 		});
+	});
+
+	it("reports real fetch network failures through onError", async () => {
+		const interceptedErrors: ErrorSnapshot[] = [];
+		const pending: Array<Promise<void>> = [];
+		const interceptor = createFetchInterceptor({
+			onIntercept: () => {
+				throw new Error("onIntercept should not run for network failures");
+			},
+			onError: (request, error) => {
+				const task = Promise.resolve().then(() => {
+					interceptedErrors.push({
+						request: {
+							method: request.method,
+							url: request.url,
+						},
+						error,
+					});
+				});
+				pending.push(task);
+			},
+		});
+
+		interceptor.start();
+
+		try {
+			await expect(
+				fetch(`${fixtureServer.origin}/api/disconnect?client=node-error`, {
+					body: JSON.stringify({ source: "node-error" }),
+					headers: { "content-type": "application/json" },
+					method: "POST",
+				}),
+			).rejects.toThrow();
+		} finally {
+			interceptor.stop();
+		}
+
+		await Promise.all(pending);
+
+		expect(interceptedErrors).toHaveLength(1);
+		expect(interceptedErrors[0]?.request.method).toBe("POST");
+		expect(interceptedErrors[0]?.request.url).toContain(
+			"/api/disconnect?client=node-error",
+		);
+		expect(interceptedErrors[0]?.error.transport).toBe("fetch");
+		expect(interceptedErrors[0]?.error.reason).toBe("error");
+		expect(interceptedErrors[0]?.error.cause).toBeTruthy();
 	});
 });

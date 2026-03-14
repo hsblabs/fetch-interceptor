@@ -190,4 +190,34 @@ describe("createFetchInterceptorHandler", () => {
 		expect(await response.text()).toBe("ok");
 		expect(consoleError).toHaveBeenCalledOnce();
 	});
+
+	it("reports rejected fetch requests through onError and rethrows the original error", async () => {
+		const networkError = new TypeError("network failed");
+		const onError = vi.fn();
+		const onIntercept = vi.fn();
+		const originalFetch = vi.fn(async () => {
+			throw networkError;
+		});
+		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
+			matcher: () => true,
+			onIntercept,
+			onError,
+		});
+
+		await expect(interceptedFetch("https://example.com/target")).rejects.toBe(
+			networkError,
+		);
+
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(onError).toHaveBeenCalledOnce();
+
+		const [request, error] = onError.mock.calls[0];
+
+		expect(request.url).toBe("https://example.com/target");
+		expect(error).toMatchObject({
+			cause: networkError,
+			reason: "error",
+			transport: "fetch",
+		});
+	});
 });

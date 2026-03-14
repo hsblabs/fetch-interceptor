@@ -1,5 +1,15 @@
-import { matchesRequestSafely, runOnInterceptSafely } from "./callbacks";
-import type { RuntimeInterceptorOptions } from "./types";
+import {
+	createInterceptionSnapshot,
+	matchesRequestSafely,
+	runInterceptionSnapshotOnError,
+	runInterceptionSnapshotOnSuccess,
+	runOnInterceptSafely,
+} from "./callbacks";
+import type {
+	FetchInterceptorError,
+	FetchInterceptorErrorReason,
+	RuntimeInterceptorOptions,
+} from "./types";
 
 // Tracks request metadata associated with each XHR instance.
 export interface XhrInterceptorData {
@@ -27,10 +37,10 @@ type XhrResponseSource = Pick<
 	| "statusText"
 >;
 
-type XhrInterceptionSnapshot = Array<{
-	onIntercept: RuntimeInterceptorOptions["onIntercept"];
-	request: Request;
-}>;
+type XhrFailureReason = FetchInterceptorErrorReason;
+type XhrTerminalEventType = XhrFailureReason | "load";
+type XhrTerminalHandler = (event: ProgressEvent<XMLHttpRequest>) => void;
+type XhrTerminalHandlers = Record<XhrTerminalEventType, XhrTerminalHandler>;
 
 function toRequestBody(body: Document | XMLHttpRequestBodyInit): BodyInit {
 	if (typeof Document !== "undefined" && body instanceof Document) {
@@ -144,45 +154,78 @@ export function createXhrLoadHandler(
 	};
 }
 
-function createXhrInterceptionSnapshot(
-	request: Request,
-	interceptors: RuntimeInterceptorOptions[],
-): XhrInterceptionSnapshot {
-	const snapshot: XhrInterceptionSnapshot = [];
-
-	for (const interceptor of interceptors) {
-		const interceptedRequest = request.clone();
-
-		if (matchesRequestSafely(interceptedRequest, interceptor.matcher)) {
-			snapshot.push({
-				request: interceptedRequest,
-				onIntercept: interceptor.onIntercept,
-			});
-		}
-	}
-
-	return snapshot;
+function createXhrInterceptorError(
+	cause: ProgressEvent<XMLHttpRequest>,
+	reason: XhrFailureReason,
+): FetchInterceptorError {
+	return {
+		cause,
+		reason,
+		transport: "xhr",
+	};
 }
 
-function createSharedXhrLoadHandler(
-	xhr: XhrResponseSource,
-	interceptionSnapshot: XhrInterceptionSnapshot,
-): () => void {
-	return () => {
-		if (interceptionSnapshot.length === 0) {
-			return;
-		}
+function detachXhrTerminalHandlers(
+	xhr: XMLHttpRequest,
+	handlers: XhrTerminalHandlers | undefined,
+): void {
+	if (!handlers) {
+		return;
+	}
 
-		const response = createXhrResponse(xhr);
+	xhr.removeEventListener("load", handlers.load);
+	xhr.removeEventListener("error", handlers.error);
+	xhr.removeEventListener("abort", handlers.abort);
+	xhr.removeEventListener("timeout", handlers.timeout);
+}
 
-		for (const interceptor of interceptionSnapshot) {
-			runOnInterceptSafely(
-				interceptor.request,
-				response.clone(),
-				interceptor.onIntercept,
-			);
-		}
+function attachXhrTerminalHandlers(
+	xhr: XMLHttpRequest,
+	interceptionSnapshot: ReturnType<typeof createInterceptionSnapshot>,
+	xhrTerminalHandlersMap: WeakMap<XMLHttpRequest, XhrTerminalHandlers>,
+): void {
+	detachXhrTerminalHandlers(xhr, xhrTerminalHandlersMap.get(xhr));
+
+	const cleanup = () => {
+		detachXhrTerminalHandlers(xhr, xhrTerminalHandlersMap.get(xhr));
+		xhrTerminalHandlersMap.delete(xhr);
 	};
+
+	const handlers: XhrTerminalHandlers = {
+		load: () => {
+			cleanup();
+			runInterceptionSnapshotOnSuccess(interceptionSnapshot, () =>
+				createXhrResponse(xhr),
+			);
+		},
+		error: (event) => {
+			cleanup();
+			runInterceptionSnapshotOnError(
+				interceptionSnapshot,
+				createXhrInterceptorError(event, "error"),
+			);
+		},
+		abort: (event) => {
+			cleanup();
+			runInterceptionSnapshotOnError(
+				interceptionSnapshot,
+				createXhrInterceptorError(event, "abort"),
+			);
+		},
+		timeout: (event) => {
+			cleanup();
+			runInterceptionSnapshotOnError(
+				interceptionSnapshot,
+				createXhrInterceptorError(event, "timeout"),
+			);
+		},
+	};
+
+	xhrTerminalHandlersMap.set(xhr, handlers);
+	xhr.addEventListener("load", handlers.load);
+	xhr.addEventListener("error", handlers.error);
+	xhr.addEventListener("abort", handlers.abort);
+	xhr.addEventListener("timeout", handlers.timeout);
 }
 
 /**
@@ -204,6 +247,10 @@ export function interceptXhr(
 	// Store metadata in a WeakMap keyed by each XHR instance.
 	// Entries disappear with the instance, so this does not leak memory.
 	const xhrDataMap = new WeakMap<XMLHttpRequest, XhrInterceptorData>();
+	const xhrTerminalHandlersMap = new WeakMap<
+		XMLHttpRequest,
+		XhrTerminalHandlers
+	>();
 
 	XMLHttpRequest.prototype.open = function (
 		method: string,
@@ -212,7 +259,6 @@ export function interceptXhr(
 		username?: string | null,
 		password?: string | null,
 	) {
-		// Save state using the current XHR instance as the key.
 		xhrDataMap.set(this, {
 			method: method.toUpperCase(),
 			url: url.toString(),
@@ -256,21 +302,24 @@ export function interceptXhr(
 		const [body] = args;
 		const data = xhrDataMap.get(this);
 
-		// Only run interception logic when metadata exists in the WeakMap.
+		detachXhrTerminalHandlers(this, xhrTerminalHandlersMap.get(this));
+		xhrTerminalHandlersMap.delete(this);
+
 		if (data) {
 			const activeInterceptors = getActiveInterceptors();
 
 			if (activeInterceptors.length > 0) {
 				const request = createXhrRequest(data, body);
-				const interceptionSnapshot = createXhrInterceptionSnapshot(
+				const interceptionSnapshot = createInterceptionSnapshot(
 					request,
 					activeInterceptors,
 				);
 
 				if (interceptionSnapshot.length > 0) {
-					this.addEventListener(
-						"load",
-						createSharedXhrLoadHandler(this, interceptionSnapshot),
+					attachXhrTerminalHandlers(
+						this,
+						interceptionSnapshot,
+						xhrTerminalHandlersMap,
 					);
 				}
 			}
@@ -279,7 +328,6 @@ export function interceptXhr(
 		return originalXhrSend.apply(this, args);
 	};
 
-	// Return a cleanup function.
 	return function restoreXhr() {
 		XMLHttpRequest.prototype.open = originalXhrOpen;
 		XMLHttpRequest.prototype.send = originalXhrSend;

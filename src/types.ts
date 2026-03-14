@@ -1,3 +1,11 @@
+export type FetchInterceptorErrorReason = "abort" | "error" | "timeout";
+
+export interface FetchInterceptorError {
+	cause: unknown;
+	reason: FetchInterceptorErrorReason;
+	transport: "fetch" | "xhr";
+}
+
 /**
  * Initialization options for FetchInterceptor.
  */
@@ -10,11 +18,21 @@ export interface FetchInterceptorOptions {
 	matcher?: (req: Request) => boolean;
 
 	/**
-	 * Callback invoked when an intercepted request completes.
+	 * Callback invoked when an intercepted request completes successfully.
 	 * @param req A standard Request object.
 	 * @param res A standard Response object, or a cloned equivalent.
 	 */
 	onIntercept: (req: Request, res: Response) => void | Promise<void>;
+
+	/**
+	 * Callback invoked when an intercepted request fails before producing a response.
+	 * @param req A standard Request object.
+	 * @param error Normalized fetch/XHR failure details.
+	 */
+	onError?: (
+		req: Request,
+		error: FetchInterceptorError,
+	) => void | Promise<void>;
 }
 
 /**

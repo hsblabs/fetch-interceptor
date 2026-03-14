@@ -67,6 +67,11 @@ async function handleApiRequest(
 	response: ServerResponse,
 	requestUrl: URL,
 ) {
+	if (requestUrl.pathname === "/api/disconnect") {
+		response.socket?.destroy();
+		return;
+	}
+
 	const delayMs = Number(requestUrl.searchParams.get("delayMs") ?? "0");
 
 	if (Number.isFinite(delayMs) && delayMs > 0) {
