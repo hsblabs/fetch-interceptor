@@ -11,7 +11,7 @@ export function createFetchRequest(
 	const [input, init] = args;
 
 	if (input instanceof Request) {
-		return input.clone();
+		return new Request(input.clone(), init);
 	}
 
 	return new Request(input, init);
