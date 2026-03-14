@@ -31,6 +31,12 @@ async function readRequestBody(request: IncomingMessage): Promise<string> {
 	return body;
 }
 
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
 function parseBody(body: string): unknown {
 	if (!body) {
 		return "";
@@ -61,6 +67,12 @@ async function handleApiRequest(
 	response: ServerResponse,
 	requestUrl: URL,
 ) {
+	const delayMs = Number(requestUrl.searchParams.get("delayMs") ?? "0");
+
+	if (Number.isFinite(delayMs) && delayMs > 0) {
+		await delay(delayMs);
+	}
+
 	const requestBody = await readRequestBody(request);
 	const payload = {
 		body: parseBody(requestBody),
