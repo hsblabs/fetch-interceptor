@@ -163,4 +163,82 @@ describe("real network behavior in Node", () => {
 			path: "/api/intercepted",
 		});
 	});
+
+	it("keeps remaining fetch interceptors active and snapshots in-flight requests", async () => {
+		const interceptedByA: InterceptSnapshot[] = [];
+		const interceptedByB: InterceptSnapshot[] = [];
+		const pending: Array<Promise<void>> = [];
+		const interceptorA = createFetchInterceptor({
+			onIntercept: (request, response) => {
+				const task = serializeIntercept(request, response).then((event) => {
+					interceptedByA.push(event);
+				});
+				pending.push(task);
+			},
+		});
+		const interceptorB = createFetchInterceptor({
+			onIntercept: (request, response) => {
+				const task = serializeIntercept(request, response).then((event) => {
+					interceptedByB.push(event);
+				});
+				pending.push(task);
+			},
+		});
+
+		interceptorA.start();
+		interceptorB.start();
+
+		try {
+			await fetch(`${fixtureServer.origin}/api/intercepted?client=node-both`, {
+				body: JSON.stringify({ source: "node-both" }),
+				headers: { "content-type": "application/json" },
+				method: "POST",
+			});
+
+			interceptorA.stop();
+
+			await fetch(
+				`${fixtureServer.origin}/api/intercepted?client=node-b-only`,
+				{
+					body: JSON.stringify({ source: "node-b-only" }),
+					headers: { "content-type": "application/json" },
+					method: "POST",
+				},
+			);
+
+			const inFlightRequest = fetch(
+				`${fixtureServer.origin}/api/intercepted?client=node-in-flight&delayMs=50`,
+				{
+					body: JSON.stringify({ source: "node-in-flight" }),
+					headers: { "content-type": "application/json" },
+					method: "POST",
+				},
+			);
+
+			interceptorB.stop();
+
+			await inFlightRequest;
+		} finally {
+			interceptorA.stop();
+			interceptorB.stop();
+		}
+
+		await Promise.all(pending);
+
+		expect(interceptedByA).toHaveLength(1);
+		expect(interceptedByA[0]?.request.body).toEqual({ source: "node-both" });
+		expect(interceptedByA[0]?.response.body).toMatchObject({
+			query: { client: "node-both" },
+		});
+
+		expect(interceptedByB).toHaveLength(3);
+		expect(interceptedByB.map((event) => event.request.body)).toEqual([
+			{ source: "node-both" },
+			{ source: "node-b-only" },
+			{ source: "node-in-flight" },
+		]);
+		expect(interceptedByB[2]?.response.body).toMatchObject({
+			query: { client: "node-in-flight", delayMs: "50" },
+		});
+	});
 });

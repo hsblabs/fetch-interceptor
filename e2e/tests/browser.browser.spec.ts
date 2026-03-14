@@ -18,6 +18,14 @@ type BrowserIntercept = {
 declare global {
 	interface Window {
 		e2e: {
+			runConcurrentFetchScenario: () => Promise<{
+				eventsA: BrowserIntercept[];
+				eventsB: BrowserIntercept[];
+			}>;
+			runConcurrentXhrScenario: () => Promise<{
+				eventsA: BrowserIntercept[];
+				eventsB: BrowserIntercept[];
+			}>;
 			runFetchScenario: (options?: {
 				useMatcher?: boolean;
 			}) => Promise<BrowserIntercept[]>;
@@ -67,4 +75,52 @@ test("intercepts real browser xhr traffic and respects matcher filters", async (
 		path: "/api/intercepted",
 		query: { client: "xhr" },
 	});
+});
+
+test("keeps remaining browser fetch interceptors active and snapshots in-flight requests", async ({
+	page,
+}) => {
+	await page.goto("/", { waitUntil: "networkidle" });
+
+	const result = await page.evaluate(() =>
+		window.e2e.runConcurrentFetchScenario(),
+	);
+
+	expect(result.eventsA).toHaveLength(1);
+	expect(result.eventsA[0]?.request.body).toEqual({ source: "fetch-both" });
+	expect(result.eventsA[0]?.response.body).toMatchObject({
+		query: { client: "fetch-both" },
+	});
+
+	expect(result.eventsB).toHaveLength(3);
+	expect(result.eventsB.map((event) => event.request.body)).toEqual([
+		{ source: "fetch-both" },
+		{ source: "fetch-b-only" },
+		{ source: "fetch-in-flight" },
+	]);
+	expect(result.eventsB[2]?.response.body).toMatchObject({
+		query: { client: "fetch-in-flight", delayMs: "50" },
+	});
+});
+
+test("keeps remaining browser xhr interceptors active across out-of-order stops", async ({
+	page,
+}) => {
+	await page.goto("/", { waitUntil: "networkidle" });
+
+	const result = await page.evaluate(() =>
+		window.e2e.runConcurrentXhrScenario(),
+	);
+
+	expect(result.eventsA).toHaveLength(1);
+	expect(result.eventsA[0]?.request.body).toEqual({ source: "xhr-both" });
+	expect(result.eventsA[0]?.response.body).toMatchObject({
+		query: { client: "xhr-both" },
+	});
+
+	expect(result.eventsB).toHaveLength(2);
+	expect(result.eventsB.map((event) => event.request.body)).toEqual([
+		{ source: "xhr-both" },
+		{ source: "xhr-b-only" },
+	]);
 });

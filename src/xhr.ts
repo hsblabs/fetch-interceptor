@@ -1,5 +1,5 @@
 import { matchesRequestSafely, runOnInterceptSafely } from "./callbacks";
-import type { FetchInterceptorOptions } from "./types";
+import type { RuntimeInterceptorOptions } from "./types";
 
 // Tracks request metadata associated with each XHR instance.
 export interface XhrInterceptorData {
@@ -7,10 +7,6 @@ export interface XhrInterceptorData {
 	url: string;
 	headers: Headers;
 }
-
-type RuntimeInterceptorOptions = Omit<FetchInterceptorOptions, "matcher"> & {
-	matcher: NonNullable<FetchInterceptorOptions["matcher"]>;
-};
 
 type XhrOpenShort = (method: string, url: string | URL) => void;
 type XhrOpenLong = (
@@ -29,6 +25,11 @@ type XhrResponseSource = Pick<
 	| "status"
 	| "statusText"
 >;
+
+type XhrInterceptionSnapshot = Array<{
+	onIntercept: RuntimeInterceptorOptions["onIntercept"];
+	request: Request;
+}>;
 
 function toRequestBody(body: Document | XMLHttpRequestBodyInit): BodyInit {
 	if (typeof Document !== "undefined" && body instanceof Document) {
@@ -104,10 +105,53 @@ export function createXhrLoadHandler(
 	};
 }
 
+function createXhrInterceptionSnapshot(
+	request: Request,
+	interceptors: RuntimeInterceptorOptions[],
+): XhrInterceptionSnapshot {
+	const snapshot: XhrInterceptionSnapshot = [];
+
+	for (const interceptor of interceptors) {
+		const interceptedRequest = request.clone();
+
+		if (matchesRequestSafely(interceptedRequest, interceptor.matcher)) {
+			snapshot.push({
+				request: interceptedRequest,
+				onIntercept: interceptor.onIntercept,
+			});
+		}
+	}
+
+	return snapshot;
+}
+
+function createSharedXhrLoadHandler(
+	xhr: XhrResponseSource,
+	interceptionSnapshot: XhrInterceptionSnapshot,
+): () => void {
+	return () => {
+		if (interceptionSnapshot.length === 0) {
+			return;
+		}
+
+		const response = createXhrResponse(xhr);
+
+		for (const interceptor of interceptionSnapshot) {
+			runOnInterceptSafely(
+				interceptor.request,
+				response.clone(),
+				interceptor.onIntercept,
+			);
+		}
+	};
+}
+
 /**
  * Intercepts XMLHttpRequest and returns a restore function.
  */
-export function interceptXhr(options: RuntimeInterceptorOptions): () => void {
+export function interceptXhr(
+	getActiveInterceptors: () => RuntimeInterceptorOptions[],
+): () => void {
 	if (typeof XMLHttpRequest === "undefined") {
 		return () => {};
 	}
@@ -175,11 +219,22 @@ export function interceptXhr(options: RuntimeInterceptorOptions): () => void {
 
 		// Only run interception logic when metadata exists in the WeakMap.
 		if (data) {
-			const request = createXhrRequest(data, body);
-			this.addEventListener(
-				"load",
-				createXhrLoadHandler(this, request, options),
-			);
+			const activeInterceptors = getActiveInterceptors();
+
+			if (activeInterceptors.length > 0) {
+				const request = createXhrRequest(data, body);
+				const interceptionSnapshot = createXhrInterceptionSnapshot(
+					request,
+					activeInterceptors,
+				);
+
+				if (interceptionSnapshot.length > 0) {
+					this.addEventListener(
+						"load",
+						createSharedXhrLoadHandler(this, interceptionSnapshot),
+					);
+				}
+			}
 		}
 
 		return originalXhrSend.apply(this, args);

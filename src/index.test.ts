@@ -153,6 +153,8 @@ describe("createFetchInterceptor", () => {
 		expect(interceptedResponse).not.toBe(response);
 		expect(await interceptedResponse.json()).toEqual({ ok: true });
 		expect(await response.json()).toEqual({ ok: true });
+
+		interceptor.stop();
 	});
 
 	it("skips fetch callbacks when the matcher returns false", async () => {
@@ -172,6 +174,8 @@ describe("createFetchInterceptor", () => {
 
 		expect(originalFetch).toHaveBeenCalledOnce();
 		expect(onIntercept).not.toHaveBeenCalled();
+
+		interceptor.stop();
 	});
 
 	it("defaults matcher to true for XMLHttpRequest calls", async () => {
@@ -212,6 +216,8 @@ describe("createFetchInterceptor", () => {
 		expect(response.statusText).toBe("Accepted");
 		expect(response.headers.get("x-request-id")).toBe("req-1");
 		expect(await response.json()).toEqual({ ok: true });
+
+		interceptor.stop();
 	});
 
 	it("starts only once and restores the original globals on stop", async () => {
@@ -255,5 +261,108 @@ describe("createFetchInterceptor", () => {
 		await fetch("https://example.com/after-stop");
 
 		expect(onIntercept).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps remaining interceptors active until the last one stops", async () => {
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		const seenByA: string[] = [];
+		const seenByB: string[] = [];
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const originalXhrOpen = XMLHttpRequest.prototype.open;
+		const originalXhrSend = XMLHttpRequest.prototype.send;
+		const originalXhrSetRequestHeader =
+			XMLHttpRequest.prototype.setRequestHeader;
+		const interceptorA = createFetchInterceptor({
+			onIntercept: (request) => seenByA.push(new URL(request.url).pathname),
+		});
+		const interceptorB = createFetchInterceptor({
+			onIntercept: (request) => seenByB.push(new URL(request.url).pathname),
+		});
+
+		interceptorA.start();
+		interceptorB.start();
+
+		await fetch("https://example.com/both-fetch");
+
+		MockXMLHttpRequest.enqueueResponse({ body: "ok" });
+
+		const firstXhr = new XMLHttpRequest();
+		firstXhr.open("GET", "https://example.com/both-xhr");
+		firstXhr.send();
+
+		expect(seenByA).toEqual(["/both-fetch", "/both-xhr"]);
+		expect(seenByB).toEqual(["/both-fetch", "/both-xhr"]);
+
+		interceptorA.stop();
+
+		expect(globalThis.fetch).not.toBe(originalFetch);
+		expect(XMLHttpRequest.prototype.open).not.toBe(originalXhrOpen);
+		expect(XMLHttpRequest.prototype.send).not.toBe(originalXhrSend);
+		expect(XMLHttpRequest.prototype.setRequestHeader).not.toBe(
+			originalXhrSetRequestHeader,
+		);
+
+		await fetch("https://example.com/after-a-stop-fetch");
+
+		MockXMLHttpRequest.enqueueResponse({ body: "ok" });
+
+		const secondXhr = new XMLHttpRequest();
+		secondXhr.open("GET", "https://example.com/after-a-stop-xhr");
+		secondXhr.send();
+
+		expect(seenByA).toEqual(["/both-fetch", "/both-xhr"]);
+		expect(seenByB).toEqual([
+			"/both-fetch",
+			"/both-xhr",
+			"/after-a-stop-fetch",
+			"/after-a-stop-xhr",
+		]);
+
+		interceptorB.stop();
+
+		expect(globalThis.fetch).toBe(originalFetch);
+		expect(XMLHttpRequest.prototype.open).toBe(originalXhrOpen);
+		expect(XMLHttpRequest.prototype.send).toBe(originalXhrSend);
+		expect(XMLHttpRequest.prototype.setRequestHeader).toBe(
+			originalXhrSetRequestHeader,
+		);
+	});
+
+	it("snapshots active fetch interceptors when a request starts", async () => {
+		const originalFetch = vi.fn(async () => {
+			return deferredResponse.promise;
+		});
+		const deferredResponse = createDeferred<Response>();
+		const seenByA: string[] = [];
+		const seenByB: string[] = [];
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptorA = createFetchInterceptor({
+			onIntercept: (request) => seenByA.push(request.url),
+		});
+		const interceptorB = createFetchInterceptor({
+			onIntercept: (request) => seenByB.push(request.url),
+		});
+
+		interceptorA.start();
+
+		const responsePromise = fetch("https://example.com/in-flight");
+
+		interceptorB.start();
+		interceptorA.stop();
+
+		deferredResponse.resolve(new Response("ok"));
+
+		await responsePromise;
+
+		expect(seenByA).toEqual(["https://example.com/in-flight"]);
+		expect(seenByB).toEqual([]);
+
+		interceptorB.stop();
 	});
 });

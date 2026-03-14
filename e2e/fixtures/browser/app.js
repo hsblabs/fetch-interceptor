@@ -44,6 +44,25 @@ function createMatcher(useMatcher) {
 	return (request) => new URL(request.url).pathname === "/api/intercepted";
 }
 
+function createEventRecorder() {
+	const events = [];
+	const pending = [];
+
+	return {
+		events,
+		onIntercept(request, response) {
+			const task = serializeIntercept(request, response).then((event) => {
+				events.push(event);
+			});
+			pending.push(task);
+		},
+		async flush() {
+			await Promise.all(pending);
+			return events;
+		},
+	};
+}
+
 function sendXhr(url, body) {
 	return new Promise((resolve, reject) => {
 		const xhr = new XMLHttpRequest();
@@ -58,16 +77,10 @@ function sendXhr(url, body) {
 }
 
 async function runFetchScenario({ useMatcher = false } = {}) {
-	const events = [];
-	const pending = [];
+	const recorder = createEventRecorder();
 	const interceptor = createFetchInterceptor({
 		matcher: createMatcher(useMatcher),
-		onIntercept: (request, response) => {
-			const task = serializeIntercept(request, response).then((event) => {
-				events.push(event);
-			});
-			pending.push(task);
-		},
+		onIntercept: (request, response) => recorder.onIntercept(request, response),
 	});
 
 	interceptor.start();
@@ -90,22 +103,14 @@ async function runFetchScenario({ useMatcher = false } = {}) {
 		interceptor.stop();
 	}
 
-	await Promise.all(pending);
-
-	return events;
+	return recorder.flush();
 }
 
 async function runXhrScenario({ useMatcher = false } = {}) {
-	const events = [];
-	const pending = [];
+	const recorder = createEventRecorder();
 	const interceptor = createFetchInterceptor({
 		matcher: createMatcher(useMatcher),
-		onIntercept: (request, response) => {
-			const task = serializeIntercept(request, response).then((event) => {
-				events.push(event);
-			});
-			pending.push(task);
-		},
+		onIntercept: (request, response) => recorder.onIntercept(request, response),
 	});
 
 	interceptor.start();
@@ -120,12 +125,100 @@ async function runXhrScenario({ useMatcher = false } = {}) {
 		interceptor.stop();
 	}
 
-	await Promise.all(pending);
+	return recorder.flush();
+}
 
-	return events;
+async function runConcurrentFetchScenario() {
+	const recorderA = createEventRecorder();
+	const recorderB = createEventRecorder();
+	const interceptorA = createFetchInterceptor({
+		onIntercept: (request, response) =>
+			recorderA.onIntercept(request, response),
+	});
+	const interceptorB = createFetchInterceptor({
+		onIntercept: (request, response) =>
+			recorderB.onIntercept(request, response),
+	});
+
+	interceptorA.start();
+	interceptorB.start();
+
+	try {
+		await fetch("/api/intercepted?client=fetch-both", {
+			body: JSON.stringify({ source: "fetch-both" }),
+			headers: { "content-type": "application/json" },
+			method: "POST",
+		});
+
+		interceptorA.stop();
+
+		await fetch("/api/intercepted?client=fetch-b-only", {
+			body: JSON.stringify({ source: "fetch-b-only" }),
+			headers: { "content-type": "application/json" },
+			method: "POST",
+		});
+
+		const inFlightRequest = fetch(
+			"/api/intercepted?client=fetch-in-flight&delayMs=50",
+			{
+				body: JSON.stringify({ source: "fetch-in-flight" }),
+				headers: { "content-type": "application/json" },
+				method: "POST",
+			},
+		);
+
+		interceptorB.stop();
+
+		await inFlightRequest;
+	} finally {
+		interceptorA.stop();
+		interceptorB.stop();
+	}
+
+	return {
+		eventsA: await recorderA.flush(),
+		eventsB: await recorderB.flush(),
+	};
+}
+
+async function runConcurrentXhrScenario() {
+	const recorderA = createEventRecorder();
+	const recorderB = createEventRecorder();
+	const interceptorA = createFetchInterceptor({
+		onIntercept: (request, response) =>
+			recorderA.onIntercept(request, response),
+	});
+	const interceptorB = createFetchInterceptor({
+		onIntercept: (request, response) =>
+			recorderB.onIntercept(request, response),
+	});
+
+	interceptorA.start();
+	interceptorB.start();
+
+	try {
+		await sendXhr("/api/intercepted?client=xhr-both", { source: "xhr-both" });
+
+		interceptorA.stop();
+
+		await sendXhr("/api/intercepted?client=xhr-b-only", {
+			source: "xhr-b-only",
+		});
+		interceptorB.stop();
+	} finally {
+		interceptorA.stop();
+		interceptorB.stop();
+	}
+
+	return {
+		eventsA: await recorderA.flush(),
+		eventsB: await recorderB.flush(),
+	};
 }
 
 window.e2e = {
+	runConcurrentFetchScenario,
+	runConcurrentXhrScenario,
 	runFetchScenario,
 	runXhrScenario,
 };
