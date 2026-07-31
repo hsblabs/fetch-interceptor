@@ -110,7 +110,7 @@ Creates an interceptor instance used to start and stop traffic interception.
 | Method | Description |
 | --- | --- |
 | `start()` | Overrides `fetch` and `XMLHttpRequest` to begin interception. Calling it more than once is safe. If installation fails, completed patches are rolled back and the interceptor remains stopped. |
-| `stop()` | Stops interception and attempts to restore every original browser API even if one restoration fails. |
+| `stop()` | Attempts to restore every original browser API. If any restoration fails, it throws and keeps the failed work retriable through another `stop()` call without stacking adapters. |
 
 ## Use Cases
 

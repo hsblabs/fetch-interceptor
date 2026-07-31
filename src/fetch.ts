@@ -12,15 +12,19 @@ type NormalizedFetchError = Extract<
 >;
 
 function isAbortError(error: unknown): boolean {
-	if (typeof DOMException !== "undefined" && error instanceof DOMException) {
-		return error.name === "AbortError";
-	}
+	try {
+		if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+			return error.name === "AbortError";
+		}
 
-	if (typeof error !== "object" || error === null) {
+		if (typeof error !== "object" || error === null) {
+			return false;
+		}
+
+		return "name" in error && error.name === "AbortError";
+	} catch {
 		return false;
 	}
-
-	return "name" in error && error.name === "AbortError";
 }
 
 function createFetchInterceptorError(error: unknown): NormalizedFetchError {

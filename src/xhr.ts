@@ -3,6 +3,7 @@ import {
 	runInterceptionSnapshotOnError,
 	runInterceptionSnapshotOnSuccess,
 } from "./callbacks";
+import { throwCollectedErrors } from "./error-aggregation";
 import type { ResolvedInterceptorOptions } from "./internal-types";
 import type { FetchInterceptorError } from "./types";
 import {
@@ -136,7 +137,7 @@ export function interceptXhr(
 		xhrMetadataMap.set(this, {
 			method: method.toUpperCase(),
 			url: url.toString(),
-			headers: new Headers(),
+			headers: [],
 		});
 
 		if (
@@ -163,12 +164,16 @@ export function interceptXhr(
 	) {
 		const [name, value] = args;
 		const metadata = xhrMetadataMap.get(this);
+		const result = originalXhrSetRequestHeader.apply(this, args);
 
 		if (metadata) {
-			metadata.headers.append(name, value);
+			xhrMetadataMap.set(this, {
+				...metadata,
+				headers: [...metadata.headers, [name, value]],
+			});
 		}
 
-		return originalXhrSetRequestHeader.apply(this, args);
+		return result;
 	};
 
 	const interceptedXhrSend = function (
@@ -213,6 +218,7 @@ export function interceptXhr(
 		if (installedSend) {
 			try {
 				xhrPrototype.send = originalXhrSend;
+				installedSend = false;
 			} catch (error) {
 				restorationErrors.push(error);
 			}
@@ -221,6 +227,7 @@ export function interceptXhr(
 		if (installedSetRequestHeader) {
 			try {
 				xhrPrototype.setRequestHeader = originalXhrSetRequestHeader;
+				installedSetRequestHeader = false;
 			} catch (error) {
 				restorationErrors.push(error);
 			}
@@ -229,21 +236,16 @@ export function interceptXhr(
 		if (installedOpen) {
 			try {
 				xhrPrototype.open = originalXhrOpen;
+				installedOpen = false;
 			} catch (error) {
 				restorationErrors.push(error);
 			}
 		}
 
-		if (restorationErrors.length === 1) {
-			throw restorationErrors[0];
-		}
-
-		if (restorationErrors.length > 1) {
-			throw new AggregateError(
-				restorationErrors,
-				"Failed to restore one or more XMLHttpRequest methods.",
-			);
-		}
+		throwCollectedErrors(
+			"Failed to restore one or more XMLHttpRequest methods.",
+			restorationErrors,
+		);
 	};
 
 	try {

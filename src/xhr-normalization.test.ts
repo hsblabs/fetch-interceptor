@@ -10,7 +10,7 @@ describe("createXhrRequest", () => {
 	it("keeps request bodies for non-GET methods, including empty strings", async () => {
 		const request = createXhrRequest(
 			{
-				headers: new Headers({ "content-type": "text/plain" }),
+				headers: [["content-type", "text/plain"]],
 				method: "POST",
 				url: "https://example.com/body",
 			},
@@ -25,7 +25,7 @@ describe("createXhrRequest", () => {
 	it("omits request bodies for GET requests", async () => {
 		const request = createXhrRequest(
 			{
-				headers: new Headers(),
+				headers: [],
 				method: "GET",
 				url: "https://example.com/no-body",
 			},

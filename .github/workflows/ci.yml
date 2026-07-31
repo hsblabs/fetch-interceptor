@@ -21,11 +21,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
 
-      - name: Test
-        run: pnpm test
+      - name: Check package
+        run: pnpm check
 
-      - name: Build
-        run: pnpm build
+      - name: Test Node integration
+        run: pnpm test:e2e:node
+
+      - name: Install Chromium
+        run: pnpm --filter @hsblabs/fetch-interceptor-e2e exec playwright install --with-deps chromium
+
+      - name: Test browser integration
+        run: pnpm test:e2e:browser
