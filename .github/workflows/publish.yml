@@ -32,6 +32,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
+
+      - name: Check package
+        run: pnpm check
+
+      - name: Test Node integration
+        run: pnpm test:e2e:node
+
+      - name: Install Chromium
+        run: pnpm --filter @hsblabs/fetch-interceptor-e2e exec playwright install --with-deps chromium
+
+      - name: Test browser integration
+        run: pnpm test:e2e:browser
+
       - name: Create release PR or publish
         id: changesets
         uses: changesets/action@v1
