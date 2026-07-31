@@ -1,6 +1,6 @@
 ---
 title: Code quality hardening tickets
-status: in-progress
+status: completed
 date: 2026-08-01
 ---
 
@@ -17,8 +17,8 @@ date: 2026-08-01
 
 ## Tracer tickets
 
-- [ ] QH-1: Add public-interface regressions for consumed fetch responses, XHR no-body/status-0 responses, callback failures, and failed startup.
-- [ ] QH-2: Make response observation safe and normalize XHR no-body/status-0 responses. Blocked by QH-1.
-- [ ] QH-3: Make lifecycle transitions transactional and model transport failures as a discriminated union. Blocked by QH-1.
-- [ ] QH-4: Remove duplicate handler paths, separate XHR normalization, tighten exports and naming, and preserve useful public JSDoc. Blocked by QH-2 and QH-3.
-- [ ] QH-5: Run declaration, unit, type, build, Node E2E, and browser E2E verification. Blocked by QH-1 through QH-4.
+- [x] QH-1: Add public-interface regressions for consumed fetch responses, XHR no-body/status-0 responses, callback failures, and failed startup.
+- [x] QH-2: Make response observation safe and normalize XHR no-body/status-0 responses. Blocked by QH-1.
+- [x] QH-3: Make lifecycle transitions transactional and model transport failures as a discriminated union. Blocked by QH-1.
+- [x] QH-4: Remove duplicate handler paths, separate XHR normalization, tighten exports and naming, and preserve useful public JSDoc. Blocked by QH-2 and QH-3.
+- [x] QH-5: Run declaration, unit, type, build, Node E2E, and browser E2E verification. Blocked by QH-1 through QH-4.
