@@ -1,3 +1,4 @@
+import { throwCollectedErrors } from "./error-aggregation";
 import { interceptFetch } from "./fetch";
 import type { ResolvedInterceptorOptions } from "./internal-types";
 import { interceptXhr } from "./xhr";
@@ -9,21 +10,6 @@ let restoreXhr: (() => void) | null = null;
 
 function getActiveInterceptors(): ResolvedInterceptorOptions[] {
 	return Array.from(activeInterceptors.values());
-}
-
-function throwCollectedErrors(
-	message: string,
-	errors: readonly unknown[],
-): void {
-	if (errors.length === 0) {
-		return;
-	}
-
-	if (errors.length === 1) {
-		throw errors[0];
-	}
-
-	throw new AggregateError(errors, message);
 }
 
 export function registerInterceptor(
@@ -67,27 +53,30 @@ export function registerInterceptor(
 }
 
 export function unregisterInterceptor(interceptorId: symbol): void {
-	if (!activeInterceptors.delete(interceptorId)) {
+	if (!activeInterceptors.has(interceptorId)) {
 		return;
 	}
 
-	if (activeInterceptors.size > 0) {
+	if (activeInterceptors.size > 1) {
+		activeInterceptors.delete(interceptorId);
 		return;
 	}
 
-	const restoreFunctions = [restoreFetch, restoreXhr];
 	const restorationErrors: unknown[] = [];
 
-	restoreFetch = null;
-	restoreXhr = null;
-
-	for (const restore of restoreFunctions) {
-		if (!restore) {
-			continue;
-		}
-
+	if (restoreFetch) {
 		try {
-			restore();
+			restoreFetch();
+			restoreFetch = null;
+		} catch (error) {
+			restorationErrors.push(error);
+		}
+	}
+
+	if (restoreXhr) {
+		try {
+			restoreXhr();
+			restoreXhr = null;
 		} catch (error) {
 			restorationErrors.push(error);
 		}
@@ -97,4 +86,6 @@ export function unregisterInterceptor(interceptorId: symbol): void {
 		"Failed to restore one or more original globals.",
 		restorationErrors,
 	);
+
+	activeInterceptors.delete(interceptorId);
 }

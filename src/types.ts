@@ -40,13 +40,13 @@ export interface FetchInterceptorOptions {
 }
 
 /**
- * Lifecycle control for one registration. Both operations are idempotent.
- * Failed installation leaves the interceptor stopped; failed restoration still
- * transitions it to stopped after attempting every installed transport.
+ * Lifecycle control for one registration. Successful transitions are
+ * idempotent. Failed installation leaves the interceptor stopped; failed
+ * restoration keeps it active so `stop()` can retry the remaining adapters.
  */
 export interface FetchInterceptor {
 	/** Installs both transport adapters or rolls back and throws. */
 	start: () => void;
-	/** Unregisters this instance and attempts every required restoration. */
+	/** Restores every adapter or throws while retaining failed restorations. */
 	stop: () => void;
 }

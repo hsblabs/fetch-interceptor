@@ -1,7 +1,7 @@
 export type XhrRequestMetadata = Readonly<{
 	method: string;
 	url: string;
-	headers: Headers;
+	headers: readonly (readonly [name: string, value: string])[];
 }>;
 
 type XhrResponseSource = Pick<
@@ -42,9 +42,15 @@ export function createXhrRequest(
 	metadata: XhrRequestMetadata,
 	body?: Document | XMLHttpRequestBodyInit | null,
 ): Request {
+	const headers = new Headers();
+
+	for (const [name, value] of metadata.headers) {
+		headers.append(name, value);
+	}
+
 	const requestInit: RequestInit = {
 		method: metadata.method,
-		headers: metadata.headers,
+		headers,
 	};
 
 	if (body != null && metadata.method !== "GET" && metadata.method !== "HEAD") {

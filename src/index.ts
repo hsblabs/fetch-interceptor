@@ -35,11 +35,8 @@ export function createFetchInterceptor(
 	const stop = () => {
 		if (!isRunning) return;
 
-		try {
-			unregisterInterceptor(interceptorId);
-		} finally {
-			isRunning = false;
-		}
+		unregisterInterceptor(interceptorId);
+		isRunning = false;
 	};
 
 	return { start, stop };
