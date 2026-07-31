@@ -1,12 +1,15 @@
 import {
-	createInterceptionSnapshot,
-	matchesRequestSafely,
+	createInterceptionSnapshotSafely,
 	runInterceptionSnapshotOnError,
 	runInterceptionSnapshotOnSuccess,
-	runOnErrorSafely,
-	runOnInterceptSafely,
 } from "./callbacks";
-import type { FetchInterceptorError, RuntimeInterceptorOptions } from "./types";
+import type { ResolvedInterceptorOptions } from "./internal-types";
+import type { FetchInterceptorError } from "./types";
+
+type NormalizedFetchError = Extract<
+	FetchInterceptorError,
+	{ transport: "fetch" }
+>;
 
 function isAbortError(error: unknown): boolean {
 	if (typeof DOMException !== "undefined" && error instanceof DOMException) {
@@ -20,7 +23,7 @@ function isAbortError(error: unknown): boolean {
 	return "name" in error && error.name === "AbortError";
 }
 
-function createFetchInterceptorError(error: unknown): FetchInterceptorError {
+function createFetchInterceptorError(error: unknown): NormalizedFetchError {
 	return {
 		cause: error,
 		reason: isAbortError(error) ? "abort" : "error",
@@ -40,60 +43,23 @@ export function createFetchRequest(
 	return new Request(input, init);
 }
 
-export function createFetchInterceptorHandler(
+function createFetchHandlerForActiveInterceptors(
 	originalFetch: typeof globalThis.fetch,
-	options: RuntimeInterceptorOptions,
-): typeof globalThis.fetch {
-	return async function interceptedFetch(
-		...args: Parameters<typeof globalThis.fetch>
-	) {
-		const request = createFetchRequest(...args);
-		const shouldIntercept = matchesRequestSafely(request, options.matcher);
-
-		try {
-			const response = await originalFetch(...args);
-
-			if (shouldIntercept) {
-				runOnInterceptSafely(request, response.clone(), options.onIntercept);
-			}
-
-			return response;
-		} catch (error) {
-			if (shouldIntercept) {
-				runOnErrorSafely(
-					request,
-					createFetchInterceptorError(error),
-					options.onError,
-				);
-			}
-
-			throw error;
-		}
-	};
-}
-
-function createSharedFetchInterceptorHandler(
-	originalFetch: typeof globalThis.fetch,
-	getActiveInterceptors: () => RuntimeInterceptorOptions[],
+	getActiveInterceptors: () => readonly ResolvedInterceptorOptions[],
 ): typeof globalThis.fetch {
 	return async function interceptedFetch(
 		...args: Parameters<typeof globalThis.fetch>
 	) {
 		const activeInterceptors = getActiveInterceptors();
-		const interceptionSnapshot =
-			activeInterceptors.length === 0
-				? []
-				: createInterceptionSnapshot(
-						createFetchRequest(...args),
-						activeInterceptors,
-					);
+		const interceptionSnapshot = createInterceptionSnapshotSafely(
+			() => createFetchRequest(...args),
+			activeInterceptors,
+		);
+
+		let response: Response;
 
 		try {
-			const response = await originalFetch(...args);
-			runInterceptionSnapshotOnSuccess(interceptionSnapshot, () =>
-				response.clone(),
-			);
-			return response;
+			response = await originalFetch(...args);
 		} catch (error) {
 			runInterceptionSnapshotOnError(
 				interceptionSnapshot,
@@ -101,18 +67,18 @@ function createSharedFetchInterceptorHandler(
 			);
 			throw error;
 		}
+
+		runInterceptionSnapshotOnSuccess(interceptionSnapshot, () => response);
+		return response;
 	};
 }
 
-/**
- * Intercepts globalThis.fetch and returns a restore function.
- */
 export function interceptFetch(
-	getActiveInterceptors: () => RuntimeInterceptorOptions[],
+	getActiveInterceptors: () => readonly ResolvedInterceptorOptions[],
 ): () => void {
 	const originalFetch = globalThis.fetch;
 
-	globalThis.fetch = createSharedFetchInterceptorHandler(
+	globalThis.fetch = createFetchHandlerForActiveInterceptors(
 		originalFetch,
 		getActiveInterceptors,
 	);

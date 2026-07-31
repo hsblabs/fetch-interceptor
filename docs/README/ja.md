@@ -53,13 +53,15 @@ pnpm test:e2e:browser
 import { createFetchInterceptor } from "@hsblabs/fetch-interceptor";
 
 const interceptor = createFetchInterceptor({
-	matcher: (req) => {
-		const url = new URL(req.url);
-		return url.pathname.includes("/api/target-data") && req.method === "GET";
+	matcher: (request) => {
+		const url = new URL(request.url);
+		return (
+			url.pathname.includes("/api/target-data") && request.method === "GET"
+		);
 	},
-	onIntercept: async (req, res) => {
+	onIntercept: async (request, response) => {
 		try {
-			const data = await res.json();
+			const data = await response.json();
 			console.log("Intercepted data:", data);
 
 			// たとえば Chrome 拡張の main world から isolated world へ
@@ -69,6 +71,15 @@ const interceptor = createFetchInterceptor({
 			console.error("Failed to parse intercepted response:", error);
 		}
 	},
+	onError: (request, error) => {
+		console.error(
+			"Intercepted request failed:",
+			request.url,
+			error.transport,
+			error.reason,
+			error.cause,
+		);
+	},
 });
 
 interceptor.start();
@@ -77,6 +88,8 @@ interceptor.start();
 
 // interceptor.stop();
 ```
+
+条件判定、レスポンス正規化、利用側コールバックのいずれかが失敗しても、ライブラリは `console.error` へ報告し、元の通信結果を維持します。`onError` に渡されるのは基盤の fetch/XHR 自体が失敗した場合だけです。status 0 で完了した XHR は、status 0 を持てる唯一の標準 `Response` である `Response.error()` として表現されるため、本文とヘッダーは利用できません。
 
 ## API リファレンス
 
@@ -88,15 +101,16 @@ interceptor.start();
 
 | プロパティ | 型 | 説明 |
 | --- | --- | --- |
-| `matcher` | `((req: Request) => boolean)?` | リクエストを傍受するかを判定する述語です。省略時はすべての通信を傍受します。 |
-| `onIntercept` | `(req: Request, res: Response) => void` | 条件に一致した通信完了時に呼ばれるコールバックです。`res` は fetch では clone されたレスポンス、XHR では等価な標準 `Response` です。 |
+| `matcher` | `((request: Request) => boolean)?` | リクエストを傍受するかを判定する述語です。省略時はすべての通信を傍受します。例外は報告され、条件不一致として扱われます。 |
+| `onIntercept` | `(request: Request, response: Response) => void \| Promise<void>` | 条件に一致した通信完了時に呼ばれるコールバックです。`response` は fetch では独立した clone、XHR では等価な標準 `Response` です。コールバックの失敗は元の通信結果を変更しません。 |
+| `onError` | `(request: Request, error: FetchInterceptorError) => void \| Promise<void>` | レスポンス生成前に基盤の通信が失敗した場合だけ呼ばれます。fetch は `error` または `abort`、XHR は加えて `timeout` を報告できます。 |
 
 ### `FetchInterceptor`
 
 | メソッド | 説明 |
 | --- | --- |
-| `start()` | `fetch` と `XMLHttpRequest` を上書きして傍受を開始します。複数回呼んでも安全です。 |
-| `stop()` | 傍受を停止し、元のブラウザ API を復元します。 |
+| `start()` | `fetch` と `XMLHttpRequest` を上書きして傍受を開始します。導入に失敗した場合は完了済みの変更を戻し、停止状態を維持します。 |
+| `stop()` | 傍受を停止します。一部の復元に失敗しても、必要な復元をすべて試みます。 |
 
 ## ユースケース
 

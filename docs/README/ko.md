@@ -53,13 +53,15 @@ pnpm test:e2e:browser
 import { createFetchInterceptor } from "@hsblabs/fetch-interceptor";
 
 const interceptor = createFetchInterceptor({
-	matcher: (req) => {
-		const url = new URL(req.url);
-		return url.pathname.includes("/api/target-data") && req.method === "GET";
+	matcher: (request) => {
+		const url = new URL(request.url);
+		return (
+			url.pathname.includes("/api/target-data") && request.method === "GET"
+		);
 	},
-	onIntercept: async (req, res) => {
+	onIntercept: async (request, response) => {
 		try {
-			const data = await res.json();
+			const data = await response.json();
 			console.log("Intercepted data:", data);
 
 			// 예를 들어 Chrome 확장의 main world 에서
@@ -69,6 +71,15 @@ const interceptor = createFetchInterceptor({
 			console.error("Failed to parse intercepted response:", error);
 		}
 	},
+	onError: (request, error) => {
+		console.error(
+			"Intercepted request failed:",
+			request.url,
+			error.transport,
+			error.reason,
+			error.cause,
+		);
+	},
 });
 
 interceptor.start();
@@ -77,6 +88,8 @@ interceptor.start();
 
 // interceptor.stop();
 ```
+
+매칭, 응답 정규화 또는 사용자 콜백이 실패해도 라이브러리는 `console.error` 로 보고하고 원래 네트워크 결과를 유지합니다. 기반 fetch/XHR 자체가 실패한 경우에만 `onError` 를 호출합니다. status 0 으로 완료된 XHR 은 status 0 을 가질 수 있는 유일한 표준 `Response` 인 `Response.error()` 로 표현되므로 본문과 헤더는 사용할 수 없습니다.
 
 ## API 레퍼런스
 
@@ -88,15 +101,16 @@ interceptor.start();
 
 | 속성 | 타입 | 설명 |
 | --- | --- | --- |
-| `matcher` | `((req: Request) => boolean)?` | 요청을 가로챌지 결정하는 predicate 입니다. 생략하면 모든 트래픽을 가로챕니다. |
-| `onIntercept` | `(req: Request, res: Response) => void` | 조건에 맞는 요청이 완료되면 호출되는 콜백입니다. `res` 는 fetch 에서는 clone 된 응답이고, XHR 에서는 이에 상응하는 표준 `Response` 입니다. |
+| `matcher` | `((request: Request) => boolean)?` | 요청을 가로챌지 결정하는 predicate 입니다. 생략하면 모든 트래픽을 가로챕니다. 예외는 보고되고 조건 불일치로 처리됩니다. |
+| `onIntercept` | `(request: Request, response: Response) => void \| Promise<void>` | 조건에 맞는 요청이 완료되면 호출됩니다. `response` 는 fetch 에서는 독립된 clone 이고, XHR 에서는 이에 상응하는 표준 `Response` 입니다. 콜백 실패는 원래 네트워크 결과를 변경하지 않습니다. |
+| `onError` | `(request: Request, error: FetchInterceptorError) => void \| Promise<void>` | 응답이 만들어지기 전에 기반 전송이 실패한 경우에만 호출됩니다. fetch 는 `error` 또는 `abort`, XHR 은 추가로 `timeout` 을 보고할 수 있습니다. |
 
 ### `FetchInterceptor`
 
 | 메서드 | 설명 |
 | --- | --- |
-| `start()` | `fetch` 와 `XMLHttpRequest` 를 override 하여 인터셉션을 시작합니다. 여러 번 호출해도 안전합니다. |
-| `stop()` | 인터셉션을 중지하고 원래 브라우저 API 를 복원합니다. |
+| `start()` | `fetch` 와 `XMLHttpRequest` 를 override 하여 인터셉션을 시작합니다. 설치가 실패하면 완료된 변경을 되돌리고 중지 상태를 유지합니다. |
+| `stop()` | 인터셉션을 중지합니다. 일부 복원이 실패해도 필요한 모든 복원을 시도합니다. |
 
 ## 사용 사례
 

@@ -1,22 +1,24 @@
-import type {
-	FetchInterceptorError,
-	FetchInterceptorOptions,
-	RuntimeInterceptorOptions,
-} from "./types";
+import type { ResolvedInterceptorOptions } from "./internal-types";
+import type { FetchInterceptorError, FetchInterceptorOptions } from "./types";
 
-type InterceptorCallbackKind = "matcher" | "onError" | "onIntercept";
+type InterceptionFailureSource =
+	| "matcher callback"
+	| "onError callback"
+	| "onIntercept callback"
+	| "request observation"
+	| "response observation";
 
-export type InterceptionSnapshot = Array<{
+export type InterceptionSnapshot = readonly Readonly<{
 	onError?: FetchInterceptorOptions["onError"];
 	onIntercept: FetchInterceptorOptions["onIntercept"];
 	request: Request;
-}>;
+}>[];
 
-function reportCallbackError(
-	kind: InterceptorCallbackKind,
+function reportInterceptionFailure(
+	source: InterceptionFailureSource,
 	error: unknown,
 ): void {
-	const message = `[fetch-interceptor] ${kind} callback failed. The original request result was preserved.`;
+	const message = `[fetch-interceptor] ${source} failed. The original request result was preserved.`;
 
 	try {
 		console.error(message, error);
@@ -32,7 +34,7 @@ export function matchesRequestSafely(
 	try {
 		return matcher(request);
 	} catch (error) {
-		reportCallbackError("matcher", error);
+		reportInterceptionFailure("matcher callback", error);
 		return false;
 	}
 }
@@ -45,10 +47,10 @@ export function runOnInterceptSafely(
 	try {
 		const result = onIntercept(request, response);
 		void Promise.resolve(result).catch((error) => {
-			reportCallbackError("onIntercept", error);
+			reportInterceptionFailure("onIntercept callback", error);
 		});
 	} catch (error) {
-		reportCallbackError("onIntercept", error);
+		reportInterceptionFailure("onIntercept callback", error);
 	}
 }
 
@@ -64,18 +66,18 @@ export function runOnErrorSafely(
 	try {
 		const result = onError(request, error);
 		void Promise.resolve(result).catch((callbackError) => {
-			reportCallbackError("onError", callbackError);
+			reportInterceptionFailure("onError callback", callbackError);
 		});
 	} catch (error) {
-		reportCallbackError("onError", error);
+		reportInterceptionFailure("onError callback", error);
 	}
 }
 
-export function createInterceptionSnapshot(
+function createInterceptionSnapshot(
 	request: Request,
-	interceptors: RuntimeInterceptorOptions[],
+	interceptors: readonly ResolvedInterceptorOptions[],
 ): InterceptionSnapshot {
-	const snapshot: InterceptionSnapshot = [];
+	const snapshot: InterceptionSnapshot[number][] = [];
 
 	for (const interceptor of interceptors) {
 		const interceptedRequest = request.clone();
@@ -92,18 +94,52 @@ export function createInterceptionSnapshot(
 	return snapshot;
 }
 
+export function createInterceptionSnapshotSafely(
+	createRequest: () => Request,
+	interceptors: readonly ResolvedInterceptorOptions[],
+): InterceptionSnapshot {
+	if (interceptors.length === 0) {
+		return [];
+	}
+
+	try {
+		return createInterceptionSnapshot(createRequest(), interceptors);
+	} catch (error) {
+		reportInterceptionFailure("request observation", error);
+		return [];
+	}
+}
+
 export function runInterceptionSnapshotOnSuccess(
 	snapshot: InterceptionSnapshot,
 	createResponse: () => Response,
 ): void {
-	let sharedResponse: Response | null = null;
+	if (snapshot.length === 0) {
+		return;
+	}
+
+	let sharedResponse: Response;
+
+	try {
+		sharedResponse = createResponse();
+	} catch (error) {
+		reportInterceptionFailure("response observation", error);
+		return;
+	}
 
 	for (const interceptor of snapshot) {
-		sharedResponse ??= createResponse();
+		let response: Response;
+
+		try {
+			response = sharedResponse.clone();
+		} catch (error) {
+			reportInterceptionFailure("response observation", error);
+			return;
+		}
 
 		runOnInterceptSafely(
 			interceptor.request,
-			sharedResponse.clone(),
+			response,
 			interceptor.onIntercept,
 		);
 	}

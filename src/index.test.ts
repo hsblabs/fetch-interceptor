@@ -28,8 +28,8 @@ type MockXhrResponse = {
 
 function createDeferred<T>(): Deferred<T> {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((res) => {
-		resolve = res;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
 	});
 
 	return { promise, resolve };
@@ -185,6 +185,48 @@ describe("createFetchInterceptor", () => {
 		interceptor.stop();
 	});
 
+	it("matches the effective Request when fetch receives Request and init", async () => {
+		const onIntercept = vi.fn();
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		const baseRequest = new Request("https://example.com/base", {
+			headers: {
+				"x-original": "1",
+			},
+			method: "PUT",
+		});
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({
+			matcher: (request) => request.method === "POST",
+			onIntercept,
+		});
+
+		interceptor.start();
+
+		await fetch(baseRequest, {
+			body: "override-body",
+			headers: {
+				"x-override": "1",
+			},
+			method: "POST",
+		});
+
+		expect(originalFetch).toHaveBeenCalledOnce();
+		expect(onIntercept).toHaveBeenCalledOnce();
+
+		const [request] = onIntercept.mock.calls[0];
+
+		expect(request.method).toBe("POST");
+		expect(request.headers.get("x-original")).toBeNull();
+		expect(request.headers.get("x-override")).toBe("1");
+		expect(await request.text()).toBe("override-body");
+		expect(baseRequest.bodyUsed).toBe(false);
+
+		interceptor.stop();
+	});
+
 	it("skips fetch callbacks when the matcher returns false", async () => {
 		const onIntercept = vi.fn();
 		const originalFetch = vi.fn(async () => new Response("ok"));
@@ -204,6 +246,144 @@ describe("createFetchInterceptor", () => {
 		expect(onIntercept).not.toHaveBeenCalled();
 
 		interceptor.stop();
+	});
+
+	it("preserves fetch responses when the matcher throws", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+		const originalFetch = vi.fn(async () => new Response("ok"));
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({
+			matcher: () => {
+				throw new Error("matcher failed");
+			},
+			onIntercept,
+		});
+
+		interceptor.start();
+
+		const response = await fetch("https://example.com/matcher-error");
+
+		expect(await response.text()).toBe("ok");
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(consoleError).toHaveBeenCalledOnce();
+
+		interceptor.stop();
+	});
+
+	it.each([
+		[
+			"throws",
+			() => {
+				throw new Error("onIntercept failed");
+			},
+		],
+		[
+			"rejects",
+			async () => {
+				throw new Error("async onIntercept failed");
+			},
+		],
+	] as const)("preserves fetch responses when onIntercept %s", async (_label, onIntercept) => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const originalFetch = vi.fn(async () => new Response("ok"));
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({ onIntercept });
+
+		interceptor.start();
+
+		const response = await fetch("https://example.com/callback-error");
+		await Promise.resolve();
+
+		expect(await response.text()).toBe("ok");
+		expect(consoleError).toHaveBeenCalledOnce();
+
+		interceptor.stop();
+	});
+
+	it("preserves a successful fetch response when observation cannot clone it", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+		const onError = vi.fn();
+		const consumedResponse = new Response("already consumed");
+
+		await consumedResponse.text();
+
+		const originalFetch = vi.fn(async () => consumedResponse);
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({
+			onIntercept,
+			onError,
+		});
+
+		interceptor.start();
+
+		try {
+			const response = await fetch("https://example.com/consumed-response");
+
+			expect(response).toBe(consumedResponse);
+			expect(onIntercept).not.toHaveBeenCalled();
+			expect(onError).not.toHaveBeenCalled();
+			expect(consoleError).toHaveBeenCalledOnce();
+		} finally {
+			interceptor.stop();
+		}
+	});
+
+	it("preserves fetch results when request observation cannot clone the input", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+		const onError = vi.fn();
+		const consumedRequest = new Request(
+			"https://example.com/consumed-request",
+			{
+				body: "already consumed",
+				method: "POST",
+			},
+		);
+
+		await consumedRequest.text();
+
+		const originalFetch = vi.fn(async () => new Response("ok"));
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({
+			onIntercept,
+			onError,
+		});
+
+		interceptor.start();
+
+		try {
+			const response = await fetch(consumedRequest);
+
+			expect(await response.text()).toBe("ok");
+			expect(originalFetch).toHaveBeenCalledWith(consumedRequest);
+			expect(onIntercept).not.toHaveBeenCalled();
+			expect(onError).not.toHaveBeenCalled();
+			expect(consoleError).toHaveBeenCalledOnce();
+		} finally {
+			interceptor.stop();
+		}
 	});
 
 	it("defaults matcher to true for XMLHttpRequest calls", async () => {
@@ -248,6 +428,86 @@ describe("createFetchInterceptor", () => {
 		interceptor.stop();
 	});
 
+	it("skips XMLHttpRequest callbacks when the matcher returns false", () => {
+		const onIntercept = vi.fn();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({ body: "ignored" });
+
+		const interceptor = createFetchInterceptor({
+			matcher: () => false,
+			onIntercept,
+		});
+
+		interceptor.start();
+
+		const xhr = new XMLHttpRequest();
+		xhr.open("GET", "https://example.com/ignored-xhr");
+		xhr.send();
+
+		expect(onIntercept).not.toHaveBeenCalled();
+
+		interceptor.stop();
+	});
+
+	it("preserves XMLHttpRequest results when the matcher throws", () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({ body: "ok" });
+
+		const interceptor = createFetchInterceptor({
+			matcher: () => {
+				throw new Error("matcher failed");
+			},
+			onIntercept,
+		});
+
+		interceptor.start();
+
+		const xhr = new XMLHttpRequest();
+		xhr.open("GET", "https://example.com/xhr-matcher-error");
+		expect(() => xhr.send()).not.toThrow();
+
+		expect(onIntercept).not.toHaveBeenCalled();
+		expect(consoleError).toHaveBeenCalledOnce();
+
+		interceptor.stop();
+	});
+
+	it("preserves XMLHttpRequest results when request observation fails", () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+		const onError = vi.fn();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({ body: "ok" });
+
+		const interceptor = createFetchInterceptor({
+			onIntercept,
+			onError,
+		});
+
+		interceptor.start();
+
+		try {
+			const xhr = new XMLHttpRequest();
+			xhr.open("GET", "http://[invalid-url");
+			expect(() => xhr.send()).not.toThrow();
+
+			expect(onIntercept).not.toHaveBeenCalled();
+			expect(onError).not.toHaveBeenCalled();
+			expect(consoleError).toHaveBeenCalledOnce();
+		} finally {
+			interceptor.stop();
+		}
+	});
+
 	it("reports rejected fetch requests through onError and preserves the original rejection", async () => {
 		const networkError = new TypeError("network failed");
 		const onIntercept = vi.fn();
@@ -282,6 +542,37 @@ describe("createFetchInterceptor", () => {
 			reason: "error",
 			transport: "fetch",
 		});
+
+		interceptor.stop();
+	});
+
+	it("preserves fetch rejection when onError rejects", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const networkError = new TypeError("network failed");
+		const originalFetch = vi.fn(async () => {
+			throw networkError;
+		});
+
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const interceptor = createFetchInterceptor({
+			onIntercept: vi.fn(),
+			onError: async () => {
+				throw new Error("onError failed");
+			},
+		});
+
+		interceptor.start();
+
+		await expect(fetch("https://example.com/on-error-failure")).rejects.toBe(
+			networkError,
+		);
+		await Promise.resolve();
+
+		expect(consoleError).toHaveBeenCalledOnce();
 
 		interceptor.stop();
 	});
@@ -387,6 +678,103 @@ describe("createFetchInterceptor", () => {
 		interceptor.stop();
 	});
 
+	it.each([
+		204, 205, 304,
+	])("normalizes XMLHttpRequest status %s without a response body", async (status) => {
+		const intercepted = createDeferred<Response>();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({
+			body: "",
+			status,
+			statusText: "No Body",
+		});
+
+		const interceptor = createFetchInterceptor({
+			onIntercept: (_request, response) => intercepted.resolve(response),
+		});
+
+		interceptor.start();
+
+		try {
+			const xhr = new XMLHttpRequest();
+			xhr.open("GET", `https://example.com/status-${status}`);
+			xhr.send();
+
+			const response = await intercepted.promise;
+
+			expect(response.status).toBe(status);
+			expect(await response.text()).toBe("");
+		} finally {
+			interceptor.stop();
+		}
+	});
+
+	it("represents XMLHttpRequest status 0 as a standard error Response", async () => {
+		const intercepted = createDeferred<Response>();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({
+			body: "local response",
+			status: 0,
+			statusText: "",
+		});
+
+		const interceptor = createFetchInterceptor({
+			onIntercept: (_request, response) => intercepted.resolve(response),
+		});
+
+		interceptor.start();
+
+		try {
+			const xhr = new XMLHttpRequest();
+			xhr.open("GET", "file:///status-zero");
+			xhr.send();
+
+			const response = await intercepted.promise;
+
+			expect(response.status).toBe(0);
+			expect(response.type).toBe("error");
+			expect(await response.text()).toBe("");
+		} finally {
+			interceptor.stop();
+		}
+	});
+
+	it("preserves XMLHttpRequest results when response normalization fails", () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const onIntercept = vi.fn();
+		const onError = vi.fn();
+
+		useMockXmlHttpRequest();
+		MockXMLHttpRequest.enqueueResponse({
+			body: "unsupported status",
+			status: 199,
+			statusText: "Unsupported",
+		});
+
+		const interceptor = createFetchInterceptor({
+			onIntercept,
+			onError,
+		});
+
+		interceptor.start();
+
+		try {
+			const xhr = new XMLHttpRequest();
+			xhr.open("GET", "https://example.com/unsupported-status");
+			expect(() => xhr.send()).not.toThrow();
+
+			expect(onIntercept).not.toHaveBeenCalled();
+			expect(onError).not.toHaveBeenCalled();
+			expect(consoleError).toHaveBeenCalledOnce();
+		} finally {
+			interceptor.stop();
+		}
+	});
+
 	it("starts only once and restores the original globals on stop", async () => {
 		const onIntercept = vi.fn();
 		const originalFetch = vi.fn(async () => new Response("ok"));
@@ -428,6 +816,92 @@ describe("createFetchInterceptor", () => {
 		await fetch("https://example.com/after-stop");
 
 		expect(onIntercept).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		"open",
+		"setRequestHeader",
+		"send",
+	] as const)("rolls back installation when XMLHttpRequest.%s cannot be patched", (nonPatchableMethod) => {
+		class NonPatchableXMLHttpRequest extends MockXMLHttpRequest {}
+
+		Object.defineProperty(
+			NonPatchableXMLHttpRequest.prototype,
+			nonPatchableMethod,
+			{
+				configurable: true,
+				value: MockXMLHttpRequest.prototype[nonPatchableMethod],
+				writable: false,
+			},
+		);
+
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		globalThis.XMLHttpRequest =
+			NonPatchableXMLHttpRequest as unknown as typeof XMLHttpRequest;
+
+		const interceptor = createFetchInterceptor({
+			onIntercept: vi.fn(),
+		});
+
+		try {
+			expect(() => interceptor.start()).toThrow();
+			expect(globalThis.fetch).toBe(originalFetch);
+			expect(NonPatchableXMLHttpRequest.prototype.open).toBe(
+				MockXMLHttpRequest.prototype.open,
+			);
+			expect(NonPatchableXMLHttpRequest.prototype.setRequestHeader).toBe(
+				MockXMLHttpRequest.prototype.setRequestHeader,
+			);
+			expect(NonPatchableXMLHttpRequest.prototype.send).toBe(
+				MockXMLHttpRequest.prototype.send,
+			);
+			expect(() => interceptor.start()).toThrow();
+		} finally {
+			interceptor.stop();
+		}
+	});
+
+	it("restores XMLHttpRequest even when restoring fetch fails", () => {
+		const originalFetch = vi.fn(async () => new Response("ok"));
+		globalThis.fetch = originalFetch as unknown as typeof fetch;
+		useMockXmlHttpRequest();
+
+		const originalXhrOpen = XMLHttpRequest.prototype.open;
+		const originalXhrSend = XMLHttpRequest.prototype.send;
+		const originalXhrSetRequestHeader =
+			XMLHttpRequest.prototype.setRequestHeader;
+		const interceptor = createFetchInterceptor({
+			onIntercept: vi.fn(),
+		});
+
+		interceptor.start();
+
+		Object.defineProperty(globalThis, "fetch", {
+			configurable: true,
+			value: globalThis.fetch,
+			writable: false,
+		});
+
+		try {
+			expect(() => interceptor.stop()).toThrow();
+			expect(XMLHttpRequest.prototype.open).toBe(originalXhrOpen);
+			expect(XMLHttpRequest.prototype.send).toBe(originalXhrSend);
+			expect(XMLHttpRequest.prototype.setRequestHeader).toBe(
+				originalXhrSetRequestHeader,
+			);
+		} finally {
+			Object.defineProperty(globalThis, "fetch", {
+				configurable: true,
+				value: originalFetch,
+				writable: true,
+			});
+			XMLHttpRequest.prototype.open = originalXhrOpen;
+			XMLHttpRequest.prototype.send = originalXhrSend;
+			XMLHttpRequest.prototype.setRequestHeader = originalXhrSetRequestHeader;
+		}
+
+		expect(() => interceptor.stop()).not.toThrow();
 	});
 
 	it("keeps remaining interceptors active until the last one stops", async () => {

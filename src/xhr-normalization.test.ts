@@ -1,15 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
-	createXhrLoadHandler,
 	createXhrRequest,
 	createXhrResponse,
 	parseXhrResponseHeaders,
-} from "./xhr";
-
-afterEach(() => {
-	vi.restoreAllMocks();
-});
+} from "./xhr-normalization";
 
 describe("createXhrRequest", () => {
 	it("keeps request bodies for non-GET methods, including empty strings", async () => {
@@ -104,117 +99,35 @@ describe("createXhrResponse", () => {
 
 		expect(await response.text()).toBe("");
 	});
-});
 
-describe("createXhrLoadHandler", () => {
-	it("invokes onIntercept when matcher returns true", async () => {
-		const onIntercept = vi.fn();
-		const request = new Request("https://example.com/xhr", {
-			method: "POST",
+	it.each([
+		204, 205, 304,
+	])("omits the body for HTTP status %s", async (status) => {
+		const response = createXhrResponse({
+			getAllResponseHeaders: () => "content-type: text/plain",
+			response: "",
+			responseType: "",
+			responseText: "",
+			status,
+			statusText: "No Body",
 		});
-		const handleLoad = createXhrLoadHandler(
-			{
-				getAllResponseHeaders: () => "content-type: text/plain",
-				response: "ok",
-				responseType: "",
-				responseText: "fallback",
-				status: 200,
-				statusText: "OK",
-			},
-			request,
-			{
-				matcher: () => true,
-				onIntercept,
-			},
-		);
 
-		handleLoad();
-
-		expect(onIntercept).toHaveBeenCalledOnce();
-
-		const [interceptedRequest, response] = onIntercept.mock.calls[0];
-
-		expect(interceptedRequest).toBe(request);
-		expect(await response.text()).toBe("ok");
+		expect(response.status).toBe(status);
+		expect(await response.text()).toBe("");
 	});
 
-	it("skips onIntercept when matcher returns false", () => {
-		const onIntercept = vi.fn();
-		const handleLoad = createXhrLoadHandler(
-			{
-				getAllResponseHeaders: () => "",
-				response: null,
-				responseType: "",
-				responseText: "",
-				status: 204,
-				statusText: "No Content",
-			},
-			new Request("https://example.com/xhr"),
-			{
-				matcher: () => false,
-				onIntercept,
-			},
-		);
+	it("represents XHR status 0 with Response.error", async () => {
+		const response = createXhrResponse({
+			getAllResponseHeaders: () => "content-type: text/plain",
+			response: "local response",
+			responseType: "",
+			responseText: "local response",
+			status: 0,
+			statusText: "",
+		});
 
-		handleLoad();
-
-		expect(onIntercept).not.toHaveBeenCalled();
-	});
-
-	it("reports matcher errors without throwing", () => {
-		const consoleError = vi
-			.spyOn(console, "error")
-			.mockImplementation(() => undefined);
-		const onIntercept = vi.fn();
-		const handleLoad = createXhrLoadHandler(
-			{
-				getAllResponseHeaders: () => "",
-				response: "ok",
-				responseType: "",
-				responseText: "ok",
-				status: 200,
-				statusText: "OK",
-			},
-			new Request("https://example.com/xhr"),
-			{
-				matcher: () => {
-					throw new Error("matcher failed");
-				},
-				onIntercept,
-			},
-		);
-
-		expect(() => handleLoad()).not.toThrow();
-		expect(onIntercept).not.toHaveBeenCalled();
-		expect(consoleError).toHaveBeenCalledOnce();
-	});
-
-	it("reports rejected async onIntercept callbacks without throwing", async () => {
-		const consoleError = vi
-			.spyOn(console, "error")
-			.mockImplementation(() => undefined);
-		const handleLoad = createXhrLoadHandler(
-			{
-				getAllResponseHeaders: () => "",
-				response: "ok",
-				responseType: "",
-				responseText: "ok",
-				status: 200,
-				statusText: "OK",
-			},
-			new Request("https://example.com/xhr"),
-			{
-				matcher: () => true,
-				onIntercept: async () => {
-					throw new Error("async onIntercept failed");
-				},
-			},
-		);
-
-		expect(() => handleLoad()).not.toThrow();
-
-		await Promise.resolve();
-
-		expect(consoleError).toHaveBeenCalledOnce();
+		expect(response.status).toBe(0);
+		expect(response.type).toBe("error");
+		expect(await response.text()).toBe("");
 	});
 });

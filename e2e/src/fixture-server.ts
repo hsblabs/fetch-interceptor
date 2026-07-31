@@ -72,6 +72,12 @@ async function handleApiRequest(
 		return;
 	}
 
+	if (requestUrl.pathname === "/api/no-content") {
+		response.statusCode = 204;
+		response.end();
+		return;
+	}
+
 	const delayMs = Number(requestUrl.searchParams.get("delayMs") ?? "0");
 
 	if (Number.isFinite(delayMs) && delayMs > 0) {

@@ -1,22 +1,15 @@
 import {
-	createInterceptionSnapshot,
-	matchesRequestSafely,
+	createInterceptionSnapshotSafely,
 	runInterceptionSnapshotOnError,
 	runInterceptionSnapshotOnSuccess,
-	runOnInterceptSafely,
 } from "./callbacks";
-import type {
-	FetchInterceptorError,
-	FetchInterceptorErrorReason,
-	RuntimeInterceptorOptions,
-} from "./types";
-
-// Tracks request metadata associated with each XHR instance.
-export interface XhrInterceptorData {
-	method: string;
-	url: string;
-	headers: Headers;
-}
+import type { ResolvedInterceptorOptions } from "./internal-types";
+import type { FetchInterceptorError } from "./types";
+import {
+	createXhrRequest,
+	createXhrResponse,
+	type XhrRequestMetadata,
+} from "./xhr-normalization";
 
 type XhrOpenShort = (method: string, url: string | URL) => void;
 type XhrOpenLong = (
@@ -27,154 +20,19 @@ type XhrOpenLong = (
 	password?: string | null,
 ) => void;
 
-type XhrResponseSource = Pick<
-	XMLHttpRequest,
-	| "getAllResponseHeaders"
-	| "response"
-	| "responseType"
-	| "responseText"
-	| "status"
-	| "statusText"
->;
-
-type XhrFailureReason = FetchInterceptorErrorReason;
+type NormalizedXhrError = Extract<FetchInterceptorError, { transport: "xhr" }>;
+type XhrFailureReason = NormalizedXhrError["reason"];
 type XhrTerminalEventType = XhrFailureReason | "load";
 type XhrTerminalEvent = ProgressEvent<XMLHttpRequestEventTarget>;
 type XhrTerminalHandler = (event: XhrTerminalEvent) => void;
-type XhrTerminalHandlers = Record<XhrTerminalEventType, XhrTerminalHandler>;
-
-function toRequestBody(body: Document | XMLHttpRequestBodyInit): BodyInit {
-	if (typeof Document !== "undefined" && body instanceof Document) {
-		return new XMLSerializer().serializeToString(body);
-	}
-
-	return body as BodyInit;
-}
-
-function cloneArrayBufferView(
-	bufferView: ArrayBufferView<ArrayBufferLike>,
-): Uint8Array<ArrayBuffer> {
-	const copy = new Uint8Array(new ArrayBuffer(bufferView.byteLength));
-	copy.set(
-		new Uint8Array(
-			bufferView.buffer,
-			bufferView.byteOffset,
-			bufferView.byteLength,
-		),
-	);
-	return copy;
-}
-
-export function createXhrRequest(
-	data: XhrInterceptorData,
-	body?: Document | XMLHttpRequestBodyInit | null,
-): Request {
-	const requestInit: RequestInit = {
-		method: data.method,
-		headers: data.headers,
-	};
-
-	if (body != null && data.method !== "GET" && data.method !== "HEAD") {
-		requestInit.body = toRequestBody(body);
-	}
-
-	return new Request(data.url, requestInit);
-}
-
-export function parseXhrResponseHeaders(rawHeaders: string): Headers {
-	const headers = new Headers();
-	const trimmedHeaders = rawHeaders.trim();
-
-	if (!trimmedHeaders) {
-		return headers;
-	}
-
-	for (const line of trimmedHeaders.split(/[\r\n]+/)) {
-		const separatorIndex = line.indexOf(":");
-
-		if (separatorIndex === -1) {
-			continue;
-		}
-
-		const name = line.slice(0, separatorIndex).trim();
-		const value = line.slice(separatorIndex + 1).trim();
-
-		if (name) {
-			headers.append(name, value);
-		}
-	}
-
-	return headers;
-}
-
-function readXhrResponseText(xhr: XhrResponseSource): string | null {
-	try {
-		return xhr.responseText;
-	} catch {
-		return null;
-	}
-}
-
-function toResponseBody(xhr: XhrResponseSource): BodyInit | null {
-	const { response, responseType } = xhr;
-
-	if (response == null) {
-		return readXhrResponseText(xhr);
-	}
-
-	if (typeof response === "string") {
-		return response;
-	}
-
-	if (typeof Blob !== "undefined" && response instanceof Blob) {
-		return response;
-	}
-
-	if (response instanceof ArrayBuffer || ArrayBuffer.isView(response)) {
-		return response instanceof ArrayBuffer
-			? response
-			: cloneArrayBufferView(response);
-	}
-
-	if (typeof Document !== "undefined" && response instanceof Document) {
-		return new XMLSerializer().serializeToString(response);
-	}
-
-	if (responseType === "json") {
-		return JSON.stringify(response);
-	}
-
-	return readXhrResponseText(xhr);
-}
-
-export function createXhrResponse(xhr: XhrResponseSource): Response {
-	const responseBody = toResponseBody(xhr);
-
-	return new Response(responseBody, {
-		status: xhr.status,
-		statusText: xhr.statusText,
-		headers: parseXhrResponseHeaders(xhr.getAllResponseHeaders()),
-	});
-}
-
-export function createXhrLoadHandler(
-	xhr: XhrResponseSource,
-	request: Request,
-	options: RuntimeInterceptorOptions,
-): () => void {
-	return () => {
-		if (!matchesRequestSafely(request, options.matcher)) {
-			return;
-		}
-
-		runOnInterceptSafely(request, createXhrResponse(xhr), options.onIntercept);
-	};
-}
+type XhrTerminalHandlers = Readonly<
+	Record<XhrTerminalEventType, XhrTerminalHandler>
+>;
 
 function createXhrInterceptorError(
 	cause: XhrTerminalEvent,
 	reason: XhrFailureReason,
-): FetchInterceptorError {
+): NormalizedXhrError {
 	return {
 		cause,
 		reason,
@@ -198,7 +56,7 @@ function detachXhrTerminalHandlers(
 
 function attachXhrTerminalHandlers(
 	xhr: XMLHttpRequest,
-	interceptionSnapshot: ReturnType<typeof createInterceptionSnapshot>,
+	interceptionSnapshot: ReturnType<typeof createInterceptionSnapshotSafely>,
 	xhrTerminalHandlersMap: WeakMap<XMLHttpRequest, XhrTerminalHandlers>,
 ): void {
 	detachXhrTerminalHandlers(xhr, xhrTerminalHandlersMap.get(xhr));
@@ -245,38 +103,37 @@ function attachXhrTerminalHandlers(
 	xhr.addEventListener("timeout", handlers.timeout);
 }
 
-/**
- * Intercepts XMLHttpRequest and returns a restore function.
- */
 export function interceptXhr(
-	getActiveInterceptors: () => RuntimeInterceptorOptions[],
+	getActiveInterceptors: () => readonly ResolvedInterceptorOptions[],
 ): () => void {
 	if (typeof XMLHttpRequest === "undefined") {
 		return () => {};
 	}
 
-	const originalXhrOpen = XMLHttpRequest.prototype.open;
+	const xhrPrototype = XMLHttpRequest.prototype;
+	const originalXhrOpen = xhrPrototype.open;
 	const originalXhrOpenShort = originalXhrOpen as XhrOpenShort;
 	const originalXhrOpenLong = originalXhrOpen as XhrOpenLong;
-	const originalXhrSend = XMLHttpRequest.prototype.send;
-	const originalXhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+	const originalXhrSend = xhrPrototype.send;
+	const originalXhrSetRequestHeader = xhrPrototype.setRequestHeader;
 
 	// Store metadata in a WeakMap keyed by each XHR instance.
 	// Entries disappear with the instance, so this does not leak memory.
-	const xhrDataMap = new WeakMap<XMLHttpRequest, XhrInterceptorData>();
+	const xhrMetadataMap = new WeakMap<XMLHttpRequest, XhrRequestMetadata>();
 	const xhrTerminalHandlersMap = new WeakMap<
 		XMLHttpRequest,
 		XhrTerminalHandlers
 	>();
 
-	XMLHttpRequest.prototype.open = function (
+	const interceptedXhrOpen = function (
+		this: XMLHttpRequest,
 		method: string,
 		url: string | URL,
 		async?: boolean,
 		username?: string | null,
 		password?: string | null,
 	) {
-		xhrDataMap.set(this, {
+		xhrMetadataMap.set(this, {
 			method: method.toUpperCase(),
 			url: url.toString(),
 			headers: new Headers(),
@@ -300,35 +157,36 @@ export function interceptXhr(
 		);
 	};
 
-	XMLHttpRequest.prototype.setRequestHeader = function (
+	const interceptedXhrSetRequestHeader = function (
+		this: XMLHttpRequest,
 		...args: Parameters<XMLHttpRequest["setRequestHeader"]>
 	) {
 		const [name, value] = args;
-		const data = xhrDataMap.get(this);
+		const metadata = xhrMetadataMap.get(this);
 
-		if (data) {
-			data.headers.append(name, value);
+		if (metadata) {
+			metadata.headers.append(name, value);
 		}
 
 		return originalXhrSetRequestHeader.apply(this, args);
 	};
 
-	XMLHttpRequest.prototype.send = function (
+	const interceptedXhrSend = function (
+		this: XMLHttpRequest,
 		...args: Parameters<XMLHttpRequest["send"]>
 	) {
 		const [body] = args;
-		const data = xhrDataMap.get(this);
+		const metadata = xhrMetadataMap.get(this);
 
 		detachXhrTerminalHandlers(this, xhrTerminalHandlersMap.get(this));
 		xhrTerminalHandlersMap.delete(this);
 
-		if (data) {
+		if (metadata) {
 			const activeInterceptors = getActiveInterceptors();
 
 			if (activeInterceptors.length > 0) {
-				const request = createXhrRequest(data, body);
-				const interceptionSnapshot = createInterceptionSnapshot(
-					request,
+				const interceptionSnapshot = createInterceptionSnapshotSafely(
+					() => createXhrRequest(metadata, body),
 					activeInterceptors,
 				);
 
@@ -345,9 +203,70 @@ export function interceptXhr(
 		return originalXhrSend.apply(this, args);
 	};
 
+	let installedOpen = false;
+	let installedSend = false;
+	let installedSetRequestHeader = false;
+
+	const restoreInstalledMethods = () => {
+		const restorationErrors: unknown[] = [];
+
+		if (installedSend) {
+			try {
+				xhrPrototype.send = originalXhrSend;
+			} catch (error) {
+				restorationErrors.push(error);
+			}
+		}
+
+		if (installedSetRequestHeader) {
+			try {
+				xhrPrototype.setRequestHeader = originalXhrSetRequestHeader;
+			} catch (error) {
+				restorationErrors.push(error);
+			}
+		}
+
+		if (installedOpen) {
+			try {
+				xhrPrototype.open = originalXhrOpen;
+			} catch (error) {
+				restorationErrors.push(error);
+			}
+		}
+
+		if (restorationErrors.length === 1) {
+			throw restorationErrors[0];
+		}
+
+		if (restorationErrors.length > 1) {
+			throw new AggregateError(
+				restorationErrors,
+				"Failed to restore one or more XMLHttpRequest methods.",
+			);
+		}
+	};
+
+	try {
+		xhrPrototype.open = interceptedXhrOpen;
+		installedOpen = true;
+		xhrPrototype.setRequestHeader = interceptedXhrSetRequestHeader;
+		installedSetRequestHeader = true;
+		xhrPrototype.send = interceptedXhrSend;
+		installedSend = true;
+	} catch (error) {
+		try {
+			restoreInstalledMethods();
+		} catch (rollbackError) {
+			throw new AggregateError(
+				[error, rollbackError],
+				"Failed to install and roll back XMLHttpRequest interception.",
+			);
+		}
+
+		throw error;
+	}
+
 	return function restoreXhr() {
-		XMLHttpRequest.prototype.open = originalXhrOpen;
-		XMLHttpRequest.prototype.send = originalXhrSend;
-		XMLHttpRequest.prototype.setRequestHeader = originalXhrSetRequestHeader;
+		restoreInstalledMethods();
 	};
 }

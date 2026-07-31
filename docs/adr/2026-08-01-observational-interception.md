@@ -27,5 +27,5 @@ The existing implementation has two independent handler paths used by production
 
 - The original fetch/XHR outcome remains authoritative even when observation cannot be completed.
 - XHR status 0 cannot retain response body or headers because the standard `Response` interface has no constructible successful status-0 representation.
-- The direct-handler testing decision in `docs/plans/2026-03-12-matcher-default-internals-design.md` is superseded. Normalization helpers remain directly testable, while transport behavior is tested through the public interface.
+- The earlier direct-handler testing approach is superseded. Normalization helpers remain directly testable, while transport behavior is tested through the public interface.
 - Public declaration comments must be preserved so consumers can see lifecycle and failure contracts in editor tooling.
