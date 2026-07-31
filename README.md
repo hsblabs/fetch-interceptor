@@ -53,13 +53,15 @@ The library is designed to stay small at the call site. The example below interc
 import { createFetchInterceptor } from "@hsblabs/fetch-interceptor";
 
 const interceptor = createFetchInterceptor({
-	matcher: (req) => {
-		const url = new URL(req.url);
-		return url.pathname.includes("/api/target-data") && req.method === "GET";
+	matcher: (request) => {
+		const url = new URL(request.url);
+		return (
+			url.pathname.includes("/api/target-data") && request.method === "GET"
+		);
 	},
-	onIntercept: async (req, res) => {
+	onIntercept: async (request, response) => {
 		try {
-			const data = await res.json();
+			const data = await response.json();
 			console.log("Intercepted data:", data);
 
 			// For example, forward data from a Chrome extension's main world
@@ -69,10 +71,10 @@ const interceptor = createFetchInterceptor({
 			console.error("Failed to parse intercepted response:", error);
 		}
 	},
-	onError: (req, error) => {
+	onError: (request, error) => {
 		console.error(
 			"Intercepted request failed:",
-			req.url,
+			request.url,
 			error.transport,
 			error.reason,
 			error.cause,
@@ -87,7 +89,7 @@ interceptor.start();
 // interceptor.stop();
 ```
 
-If `matcher` throws, or if `onIntercept`/`onError` throws or returns a rejected promise, the library reports the failure with `console.error` and preserves the original network result. When the underlying fetch/XHR request itself fails before producing a response, `onError` receives a normalized descriptor containing the transport, failure reason, and raw cause.
+If matching, response normalization, or a consumer callback fails, the library reports the failure with `console.error` and preserves the original network result. Only an underlying fetch/XHR failure is passed to `onError`. An XHR load with status 0 is represented by `Response.error()`, the only standard `Response` value with status 0; its body and headers are therefore unavailable.
 
 ## API Reference
 
@@ -99,16 +101,16 @@ Creates an interceptor instance used to start and stop traffic interception.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `matcher` | `((req: Request) => boolean)?` | Predicate that decides whether a request should be intercepted. When omitted, all matching traffic is intercepted. Exceptions are reported and treated as a non-match. |
-| `onIntercept` | `(req: Request, res: Response) => void \| Promise<void>` | Callback invoked when a matching request completes successfully. `res` is a cloned response for fetch, or an equivalent standard `Response` for XHR. Exceptions and rejected promises are reported without changing the original request outcome. |
-| `onError` | `(req: Request, error: FetchInterceptorError) => void \| Promise<void>` | Callback invoked when a matching request fails before a response is produced. `error.transport` identifies `fetch` or `xhr`, `error.reason` is `error`, `abort`, or `timeout`, and `error.cause` contains the raw fetch rejection or XHR terminal event. Exceptions and rejected promises are reported without changing the original request outcome. |
+| `matcher` | `((request: Request) => boolean)?` | Predicate that decides whether a request should be intercepted. When omitted, all traffic is intercepted. Exceptions are reported and treated as a non-match. |
+| `onIntercept` | `(request: Request, response: Response) => void \| Promise<void>` | Callback invoked when a matching request completes successfully. `response` is an independent clone for fetch, or an equivalent standard `Response` for XHR. Exceptions and rejected promises are reported without changing the original request outcome. |
+| `onError` | `(request: Request, error: FetchInterceptorError) => void \| Promise<void>` | Callback invoked only when the underlying transport fails before producing a response. Fetch can report `error` or `abort`; XHR can also report `timeout`. `cause` contains the raw fetch rejection or XHR terminal event. |
 
 ### `FetchInterceptor`
 
 | Method | Description |
 | --- | --- |
-| `start()` | Overrides `fetch` and `XMLHttpRequest` to begin interception. Calling it more than once is safe. |
-| `stop()` | Stops interception and restores the original browser APIs. |
+| `start()` | Overrides `fetch` and `XMLHttpRequest` to begin interception. Calling it more than once is safe. If installation fails, completed patches are rolled back and the interceptor remains stopped. |
+| `stop()` | Stops interception and attempts to restore every original browser API even if one restoration fails. |
 
 ## Use Cases
 

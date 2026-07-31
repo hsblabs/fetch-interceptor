@@ -32,6 +32,10 @@ declare global {
 			runXhrScenario: (options?: {
 				useMatcher?: boolean;
 			}) => Promise<BrowserIntercept[]>;
+			runXhrNoContentScenario: () => Promise<{
+				events: BrowserIntercept[];
+				responseStatus: number | null;
+			}>;
 		};
 	}
 }
@@ -75,6 +79,31 @@ test("intercepts real browser xhr traffic and respects matcher filters", async (
 		path: "/api/intercepted",
 		query: { client: "xhr" },
 	});
+});
+
+test("normalizes a real browser xhr 204 response without a body", async ({
+	page,
+}) => {
+	const browserErrors: string[] = [];
+	page.on("console", (message) => {
+		if (message.type() === "error") {
+			browserErrors.push(message.text());
+		}
+	});
+	page.on("pageerror", (error) => browserErrors.push(error.message));
+
+	await page.goto("/", { waitUntil: "networkidle" });
+
+	const result = await page.evaluate(() =>
+		window.e2e.runXhrNoContentScenario(),
+	);
+
+	expect(browserErrors).toEqual([]);
+	expect(result.responseStatus).toBe(204);
+	expect(result.events).toHaveLength(1);
+	expect(result.events[0]?.request.url).toContain("/api/no-content");
+	expect(result.events[0]?.response.status).toBe(204);
+	expect(result.events[0]?.response.body).toBe("");
 });
 
 test("keeps remaining browser fetch interceptors active and snapshots in-flight requests", async ({

@@ -68,7 +68,7 @@ function sendXhr(url, body) {
 		const xhr = new XMLHttpRequest();
 		xhr.open("POST", url);
 		xhr.setRequestHeader("content-type", "application/json");
-		xhr.addEventListener("load", () => resolve());
+		xhr.addEventListener("load", () => setTimeout(resolve, 0));
 		xhr.addEventListener("error", () =>
 			reject(new Error("XHR request failed.")),
 		);
@@ -126,6 +126,30 @@ async function runXhrScenario({ useMatcher = false } = {}) {
 	}
 
 	return recorder.flush();
+}
+
+async function runXhrNoContentScenario() {
+	const recorder = createEventRecorder();
+	let responseStatus = null;
+	const interceptor = createFetchInterceptor({
+		onIntercept: (request, response) => {
+			responseStatus = response.status;
+			recorder.onIntercept(request, response);
+		},
+	});
+
+	interceptor.start();
+
+	try {
+		await sendXhr("/api/no-content", { source: "xhr-no-content" });
+	} finally {
+		interceptor.stop();
+	}
+
+	return {
+		events: await recorder.flush(),
+		responseStatus,
+	};
 }
 
 async function runConcurrentFetchScenario() {
@@ -220,5 +244,6 @@ window.e2e = {
 	runConcurrentFetchScenario,
 	runConcurrentXhrScenario,
 	runFetchScenario,
+	runXhrNoContentScenario,
 	runXhrScenario,
 };

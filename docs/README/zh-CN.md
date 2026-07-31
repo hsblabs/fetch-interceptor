@@ -53,13 +53,15 @@ pnpm test:e2e:browser
 import { createFetchInterceptor } from "@hsblabs/fetch-interceptor";
 
 const interceptor = createFetchInterceptor({
-	matcher: (req) => {
-		const url = new URL(req.url);
-		return url.pathname.includes("/api/target-data") && req.method === "GET";
+	matcher: (request) => {
+		const url = new URL(request.url);
+		return (
+			url.pathname.includes("/api/target-data") && request.method === "GET"
+		);
 	},
-	onIntercept: async (req, res) => {
+	onIntercept: async (request, response) => {
 		try {
-			const data = await res.json();
+			const data = await response.json();
 			console.log("Intercepted data:", data);
 
 			// 例如，将数据从 Chrome 扩展的 main world
@@ -69,6 +71,15 @@ const interceptor = createFetchInterceptor({
 			console.error("Failed to parse intercepted response:", error);
 		}
 	},
+	onError: (request, error) => {
+		console.error(
+			"Intercepted request failed:",
+			request.url,
+			error.transport,
+			error.reason,
+			error.cause,
+		);
+	},
 });
 
 interceptor.start();
@@ -77,6 +88,8 @@ interceptor.start();
 
 // interceptor.stop();
 ```
+
+匹配、响应规范化或调用方回调失败时，库会通过 `console.error` 报告并保留原始网络结果。只有底层 fetch/XHR 本身失败时才会调用 `onError`。以 status 0 完成的 XHR 会表示为 `Response.error()`，因为它是唯一能持有 status 0 的标准 `Response`；因此响应体和响应头不可用。
 
 ## API 参考
 
@@ -88,15 +101,16 @@ interceptor.start();
 
 | 属性 | 类型 | 说明 |
 | --- | --- | --- |
-| `matcher` | `((req: Request) => boolean)?` | 用于判断请求是否应被拦截的谓词。省略时将拦截所有流量。 |
-| `onIntercept` | `(req: Request, res: Response) => void` | 当匹配请求完成时调用的回调。`res` 在 fetch 场景中是克隆后的响应，在 XHR 场景中是等价的标准 `Response`。 |
+| `matcher` | `((request: Request) => boolean)?` | 用于判断请求是否应被拦截的谓词。省略时将拦截所有流量。异常会被报告并视为不匹配。 |
+| `onIntercept` | `(request: Request, response: Response) => void \| Promise<void>` | 当匹配请求完成时调用的回调。`response` 在 fetch 场景中是独立克隆，在 XHR 场景中是等价的标准 `Response`。回调失败不会改变原始网络结果。 |
+| `onError` | `(request: Request, error: FetchInterceptorError) => void \| Promise<void>` | 仅在底层传输于生成响应前失败时调用。fetch 可报告 `error` 或 `abort`，XHR 还可报告 `timeout`。 |
 
 ### `FetchInterceptor`
 
 | 方法 | 说明 |
 | --- | --- |
-| `start()` | 覆盖 `fetch` 和 `XMLHttpRequest` 以开始拦截。重复调用也是安全的。 |
-| `stop()` | 停止拦截并恢复原始浏览器 API。 |
+| `start()` | 覆盖 `fetch` 和 `XMLHttpRequest` 以开始拦截。安装失败时会回滚已完成的修改并保持停止状态。 |
+| `stop()` | 停止拦截。即使某一步恢复失败，也会尝试所有必要的恢复操作。 |
 
 ## 使用场景
 

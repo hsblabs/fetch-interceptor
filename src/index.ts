@@ -1,37 +1,45 @@
+import type { ResolvedInterceptorOptions } from "./internal-types";
 import { registerInterceptor, unregisterInterceptor } from "./runtime";
 import type { FetchInterceptor, FetchInterceptorOptions } from "./types";
 
-export * from "./types";
+export type {
+	FetchInterceptor,
+	FetchInterceptorError,
+	FetchInterceptorErrorReason,
+	FetchInterceptorOptions,
+} from "./types";
 
 const matchAllRequests = () => true;
 
 /**
- * Creates a FetchInterceptor instance that intercepts network traffic.
- * @param options Matcher and callback options for interception.
- * @returns A control interface with start and stop methods.
+ * Creates an inactive interceptor. Omitting `matcher` observes every request;
+ * call `start()` to register it and `stop()` to restore it.
  */
 export function createFetchInterceptor(
 	options: FetchInterceptorOptions,
 ): FetchInterceptor {
 	let isRunning = false;
 	const interceptorId = Symbol("fetch-interceptor");
-	const resolvedOptions = {
+	const resolvedOptions: ResolvedInterceptorOptions = {
 		...options,
 		matcher: options.matcher ?? matchAllRequests,
 	};
 
 	const start = () => {
 		if (isRunning) return;
-		isRunning = true;
 
 		registerInterceptor(interceptorId, resolvedOptions);
+		isRunning = true;
 	};
 
 	const stop = () => {
 		if (!isRunning) return;
-		isRunning = false;
 
-		unregisterInterceptor(interceptorId);
+		try {
+			unregisterInterceptor(interceptorId);
+		} finally {
+			isRunning = false;
+		}
 	};
 
 	return { start, stop };

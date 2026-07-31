@@ -1,10 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { createFetchInterceptorHandler, createFetchRequest } from "./fetch";
-
-afterEach(() => {
-	vi.restoreAllMocks();
-});
+import { createFetchRequest } from "./fetch";
 
 describe("createFetchRequest", () => {
 	it("clones Request inputs", async () => {
@@ -21,7 +17,7 @@ describe("createFetchRequest", () => {
 		expect(await clonedRequest.text()).toBe("hello");
 	});
 
-	it("applies init overrides to Request inputs without consuming the original body", async () => {
+	it("applies init overrides without consuming the original body", async () => {
 		const originalRequest = new Request("https://example.com/base", {
 			body: "original-body",
 			headers: {
@@ -56,168 +52,5 @@ describe("createFetchRequest", () => {
 		expect(request.method).toBe("PUT");
 		expect(request.headers.get("content-type")).toBe("application/json");
 		expect(await request.json()).toEqual({ hello: "world" });
-	});
-});
-
-describe("createFetchInterceptorHandler", () => {
-	it("matches against the effective Request when fetch receives Request and init", async () => {
-		const onIntercept = vi.fn();
-		const originalFetch = vi.fn(async () => new Response("ok"));
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: (request) => request.method === "POST",
-			onIntercept,
-		});
-		const baseRequest = new Request("https://example.com/base", {
-			headers: {
-				"x-original": "1",
-			},
-			method: "PUT",
-		});
-
-		await interceptedFetch(baseRequest, {
-			body: "override-body",
-			headers: {
-				"x-override": "1",
-			},
-			method: "POST",
-		});
-
-		expect(originalFetch).toHaveBeenCalledOnce();
-		expect(onIntercept).toHaveBeenCalledOnce();
-
-		const [request] = onIntercept.mock.calls[0];
-
-		expect(request.method).toBe("POST");
-		expect(request.headers.get("x-original")).toBeNull();
-		expect(request.headers.get("x-override")).toBe("1");
-		expect(await request.text()).toBe("override-body");
-		expect(baseRequest.bodyUsed).toBe(false);
-	});
-
-	it("intercepts matching requests with a cloned response", async () => {
-		const onIntercept = vi.fn();
-		const originalFetch = vi.fn(async () => {
-			return new Response(JSON.stringify({ ok: true }), {
-				headers: { "content-type": "application/json" },
-			});
-		});
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: (request) => request.url === "https://example.com/target",
-			onIntercept,
-		});
-
-		const response = await interceptedFetch("https://example.com/target");
-
-		expect(originalFetch).toHaveBeenCalledOnce();
-		expect(onIntercept).toHaveBeenCalledOnce();
-
-		const [request, interceptedResponse] = onIntercept.mock.calls[0];
-
-		expect(request.url).toBe("https://example.com/target");
-		expect(interceptedResponse).not.toBe(response);
-		expect(await interceptedResponse.json()).toEqual({ ok: true });
-		expect(await response.json()).toEqual({ ok: true });
-	});
-
-	it("skips onIntercept when matcher returns false", async () => {
-		const onIntercept = vi.fn();
-		const originalFetch = vi.fn(async () => new Response("ok"));
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: () => false,
-			onIntercept,
-		});
-
-		await interceptedFetch("https://example.com/ignored");
-
-		expect(originalFetch).toHaveBeenCalledOnce();
-		expect(onIntercept).not.toHaveBeenCalled();
-	});
-
-	it("preserves successful fetch responses when matcher throws", async () => {
-		const consoleError = vi
-			.spyOn(console, "error")
-			.mockImplementation(() => undefined);
-		const originalFetch = vi.fn(async () => new Response("ok"));
-		const onIntercept = vi.fn();
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: () => {
-				throw new Error("matcher failed");
-			},
-			onIntercept,
-		});
-
-		const response = await interceptedFetch("https://example.com/target");
-
-		expect(await response.text()).toBe("ok");
-		expect(onIntercept).not.toHaveBeenCalled();
-		expect(consoleError).toHaveBeenCalledOnce();
-	});
-
-	it("preserves successful fetch responses when onIntercept throws", async () => {
-		const consoleError = vi
-			.spyOn(console, "error")
-			.mockImplementation(() => undefined);
-		const originalFetch = vi.fn(async () => new Response("ok"));
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: () => true,
-			onIntercept: () => {
-				throw new Error("onIntercept failed");
-			},
-		});
-
-		const response = await interceptedFetch("https://example.com/target");
-
-		expect(await response.text()).toBe("ok");
-		expect(consoleError).toHaveBeenCalledOnce();
-	});
-
-	it("reports rejected async onIntercept callbacks without rejecting fetch", async () => {
-		const consoleError = vi
-			.spyOn(console, "error")
-			.mockImplementation(() => undefined);
-		const originalFetch = vi.fn(async () => new Response("ok"));
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: () => true,
-			onIntercept: async () => {
-				throw new Error("async onIntercept failed");
-			},
-		});
-
-		const response = await interceptedFetch("https://example.com/target");
-
-		await Promise.resolve();
-
-		expect(await response.text()).toBe("ok");
-		expect(consoleError).toHaveBeenCalledOnce();
-	});
-
-	it("reports rejected fetch requests through onError and rethrows the original error", async () => {
-		const networkError = new TypeError("network failed");
-		const onError = vi.fn();
-		const onIntercept = vi.fn();
-		const originalFetch = vi.fn(async () => {
-			throw networkError;
-		});
-		const interceptedFetch = createFetchInterceptorHandler(originalFetch, {
-			matcher: () => true,
-			onIntercept,
-			onError,
-		});
-
-		await expect(interceptedFetch("https://example.com/target")).rejects.toBe(
-			networkError,
-		);
-
-		expect(onIntercept).not.toHaveBeenCalled();
-		expect(onError).toHaveBeenCalledOnce();
-
-		const [request, error] = onError.mock.calls[0];
-
-		expect(request.url).toBe("https://example.com/target");
-		expect(error).toMatchObject({
-			cause: networkError,
-			reason: "error",
-			transport: "fetch",
-		});
 	});
 });

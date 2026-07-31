@@ -1,56 +1,52 @@
-export type FetchInterceptorErrorReason = "abort" | "error" | "timeout";
-
-export interface FetchInterceptorError {
+type FetchTransportError = Readonly<{
 	cause: unknown;
-	reason: FetchInterceptorErrorReason;
-	transport: "fetch" | "xhr";
-}
+	reason: "abort" | "error";
+	transport: "fetch";
+}>;
 
-/**
- * Initialization options for FetchInterceptor.
- */
+type XhrTransportError = Readonly<{
+	cause: ProgressEvent<XMLHttpRequestEventTarget>;
+	reason: "abort" | "error" | "timeout";
+	transport: "xhr";
+}>;
+
+/** A failure produced by the underlying transport before a response exists. */
+export type FetchInterceptorError = FetchTransportError | XhrTransportError;
+
+export type FetchInterceptorErrorReason = FetchInterceptorError["reason"];
+
+/** Consumer callbacks and filtering for an interceptor instance. */
 export interface FetchInterceptorOptions {
 	/**
-	 * Determines whether a request should be intercepted.
-	 * @param req A standard Request object.
-	 * @returns Returns true when the request should be intercepted.
+	 * Selects requests to observe. A thrown exception is reported and treated as
+	 * a non-match without changing the network result.
 	 */
-	matcher?: (req: Request) => boolean;
+	matcher?: (request: Request) => boolean;
 
 	/**
-	 * Callback invoked when an intercepted request completes successfully.
-	 * @param req A standard Request object.
-	 * @param res A standard Response object, or a cloned equivalent.
+	 * Observes a matched request and an independent response clone. Exceptions
+	 * and rejected promises are reported without changing the network result.
 	 */
-	onIntercept: (req: Request, res: Response) => void | Promise<void>;
+	onIntercept: (request: Request, response: Response) => void | Promise<void>;
 
 	/**
-	 * Callback invoked when an intercepted request fails before producing a response.
-	 * @param req A standard Request object.
-	 * @param error Normalized fetch/XHR failure details.
+	 * Observes an underlying transport failure before a response exists. Callback
+	 * failures are reported without replacing the original transport failure.
 	 */
 	onError?: (
-		req: Request,
+		request: Request,
 		error: FetchInterceptorError,
 	) => void | Promise<void>;
 }
 
 /**
- * Runtime options after default values have been resolved.
- */
-export type RuntimeInterceptorOptions = Omit<
-	FetchInterceptorOptions,
-	"matcher"
-> & {
-	matcher: NonNullable<FetchInterceptorOptions["matcher"]>;
-};
-
-/**
- * FetchInterceptor instance exposed to consumers.
+ * Lifecycle control for one registration. Both operations are idempotent.
+ * Failed installation leaves the interceptor stopped; failed restoration still
+ * transitions it to stopped after attempting every installed transport.
  */
 export interface FetchInterceptor {
-	/** Starts interception. */
+	/** Installs both transport adapters or rolls back and throws. */
 	start: () => void;
-	/** Stops interception and restores the original global objects. */
+	/** Unregisters this instance and attempts every required restoration. */
 	stop: () => void;
 }
