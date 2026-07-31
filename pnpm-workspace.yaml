@@ -2,5 +2,8 @@ packages:
   - .
   - e2e
 
+overrides:
+  vite: 7.3.5
+
 ignoredBuiltDependencies:
   - esbuild
